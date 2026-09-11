@@ -68,9 +68,15 @@ def majority_target(annotations: list[list[str]], target: str) -> tuple[int, int
 
 def choose_rows(annotations: dict[str, list[list[str]]], per_label: int) -> list[dict[str, object]]:
     selected: list[dict[str, object]] = []
+    used_source_keys: set[str] = set()
     for label_id, label_name in TARGET_LABELS.items():
         candidates: list[dict[str, object]] = []
         for source_key in sorted(annotations):
+            # An ad can have a majority vote for more than one upstream
+            # sentiment. Keep the pilot at the requested number of distinct
+            # source ads instead of counting the same source once per label.
+            if source_key in used_source_keys:
+                continue
             votes = majority_target(annotations[source_key], label_id)
             if votes is None:
                 continue
@@ -89,7 +95,9 @@ def choose_rows(annotations: dict[str, list[list[str]]], per_label: int) -> list
                 f"only {len(candidates)} majority-vote examples available for {label_id} ({label_name}); "
                 f"need {per_label}"
             )
-        selected.extend(candidates[:per_label])
+        chosen = candidates[:per_label]
+        selected.extend(chosen)
+        used_source_keys.update(str(row["source_key"]) for row in chosen)
     return selected
 
 
