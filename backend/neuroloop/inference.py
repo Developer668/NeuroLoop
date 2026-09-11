@@ -15,10 +15,19 @@ from .readout import summarize, validate_response
 
 _model=None
 
+
+def _digest(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
 @lru_cache(maxsize=1)
 def profile_id() -> str:
     root=settings().root
-    files=[root/'models/load_local_tribe.py',root/'tribev2-balanced-qv-local/load_quantized_tribev2.py',root/'tribev2-balanced-qv-local/config.yaml',root/'tribev2-balanced-qv-local/quantized_video/quantization.json',Path(__file__),root/'backend/neuroloop/tsam.py']
+    files=[root/'models/load_local_tribe.py',root/'tribev2-balanced-qv-local/load_quantized_tribev2.py',root/'tribev2-balanced-qv-local/config.yaml',root/'tribev2-balanced-qv-local/quantized_video/quantization.json',root/'tribev2-balanced-qv-local/best.ckpt',Path(__file__),root/'backend/neuroloop/tsam.py',root/'backend/neuroloop/kragel.py',root/'backend/neuroloop/response.py',root/'backend/neuroloop/schemas.py']
+    files += sorted((root/'data/geometry').glob('*.gii.gz'))
+    files += sorted((root/'models/brain_readouts/kragel2015/source').glob('*.hdr'))
+    files += sorted((root/'models/brain_readouts/kragel2015/source').glob('*.img'))
     h=hashlib.sha256()
     for p in files:
         if p.exists(): h.update(p.read_bytes())
@@ -150,8 +159,12 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
     atomic_numpy(output/'prediction.npy',predictions)
     times=[float(x.start) for x in segments]
     atomic_json(output/'segments.json',[{'start':float(x.start),'duration':float(x.duration)} for x in segments])
+    tribe_profile = profile_id()
+    geometry_files = sorted((root/'data/geometry').glob('*.gii.gz'))
+    geometry_manifest = {path.name: _digest(path) for path in geometry_files}
+    geometry_hash = hashlib.sha256(json.dumps(geometry_manifest, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     evidence=summarize(predictions,times)
-    evidence.update({'evaluator':'TRIBE v2','profile':profile_id(),'kind':'model_predicted_cortical_response','device':device,'segment_durations':[float(x.duration) for x in segments],'source_duration':duration,'modalities':sorted(events.type.unique().tolist()),'transcript_source':transcript_source,'transcript_words':len(words),'input_adaptation':adaptation,'seconds':time.monotonic()-started,'peak_cuda_bytes':torch.cuda.max_memory_allocated() if device == 'cuda' else None,'time_note':'Official segment timestamps retained. TRIBE handles the hemodynamic offset; no extra time shift is applied.','quantization':'Original TRIBE brain checkpoint; locally quantized INT8 video and NF4 base text encoders.','limitations':['Predicted average cortical response, not an individual brain scan.','Not purchase intent, CTR, thoughts, or a calibrated emotion probability.','Quantized end-to-end neuroscience accuracy has not been established.'],'emotion_decoder':{'status':'experimental' if config.get('include_kragel') else 'not_requested','reason':'Kragel pattern expression is model-to-model experimental evidence, not calibrated human emotion.'}})
+    evidence.update({'evaluator':'TRIBE v2','profile':tribe_profile,'kind':'model_predicted_cortical_response','device':device,'segment_durations':[float(x.duration) for x in segments],'source_duration':duration,'modalities':sorted(events.type.unique().tolist()),'transcript_source':transcript_source,'transcript_words':len(words),'input_adaptation':adaptation,'seconds':time.monotonic()-started,'peak_cuda_bytes':torch.cuda.max_memory_allocated() if device == 'cuda' else None,'time_note':'Official segment timestamps retained. TRIBE handles the hemodynamic offset; no extra time shift is applied.','quantization':'Original TRIBE brain checkpoint; locally quantized INT8 video and NF4 base text encoders.','limitations':['Predicted average cortical response, not an individual brain scan.','Not purchase intent, CTR, thoughts, or a calibrated emotion probability.','Quantized end-to-end neuroscience accuracy has not been established.'],'provenance':{'contract_version':'response-provenance/v1','model':{'name':'TRIBE v2','version':tribe_profile},'checkpoint':{'sha256':_digest(root/'tribev2-balanced-qv-local/best.ckpt'),'version':'best.ckpt'},'preprocessing':{'version':'TRIBE official event timeline; profile-bound','sha256':tribe_profile},'geometry':{'version':'fsaverage5-left-right-v1','sha256':geometry_hash,'files':geometry_manifest},'projection':{'version':'not_applicable/tribe-cortical-output-v1','sha256':None,'meaning':'TRIBE cortical output is not a volume projection'},'time_axis':{'version':'normalized-interval-axis/v1','source_duration':duration,'segments':[{'start':float(x.start),'duration':float(x.duration)} for x in segments]}},'emotion_decoder':{'status':'experimental' if config.get('include_kragel') else 'not_requested','reason':'Kragel pattern expression is model-to-model experimental evidence, not calibrated human emotion.'}})
     evidence['hardware_preflight']=preflight
     if config.get('include_tsam'):
         if not config.get('tsam_research_acknowledged'):
@@ -169,10 +182,10 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
         on_progress('Computing experimental Kragel emotion-pattern expression')
         try:
             from .kragel import decode
-            evidence['kragel']=decode(predictions,times)
+            evidence['kragel']=decode(predictions,times,[float(x.duration) for x in segments],duration)
         except Exception as exc:
             evidence['kragel']={'status':'failed','reason':str(exc)[:500]}
-    if evidence.get('tsam') or evidence.get('kragel'):
+    if any(value.get('status') == 'experimental' for value in (evidence.get('tsam'), evidence.get('kragel')) if isinstance(value, dict)):
         from .response import ensemble
         evidence['response_ensemble']=ensemble(evidence)
     evidence['seconds']=time.monotonic()-started

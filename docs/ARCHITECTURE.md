@@ -220,7 +220,10 @@ source hashes, transform profile and limitations remain in each evaluation recor
 
 TSAM remains independent from TRIBE. It receives the original audiovisual stimulus and
 returns eight uncalibrated class logits in five-second windows. It is never fed a TRIBE
-array. The staged macOS model environment pins the dependencies required by the upstream
+array. Its exact class order is Anger, Contempt, Disgust, Fear, Happiness, Neutral,
+Sadness, Surprise. Windows are complete, non-overlapping five-second intervals with a
+five-second stride; incomplete tails are omitted and reported. The staged macOS model
+environment pins the dependencies required by the upstream
 implementation and strict checkpoint loading is required at runtime.
 
 ### Response ensemble
@@ -234,6 +237,14 @@ visible. Missing sources cause a transparent degraded calculation, not invented 
 The target metric `response-target-distance/v1` compares these relative model-evidence
 values with the user-declared `TargetSpec` and applies a disagreement penalty. It is an
 optimization score, not a percentage of viewers predicted to feel an emotion.
+
+`TargetSpec` defaults to a whole-creative objective for compatibility, and can select a
+normalized `[0,1]` interval or multiple named intervals. Each source is aligned to the
+same source-duration axis and scored only over actual overlap. Short clips, omitted
+tails, and disjoint/unsupported dimensions remain explicit missing coverage; changing a
+different segment cannot satisfy a selected segment's target. The response provenance
+contract records model/checkpoint/preprocessing/geometry/projection metadata plus the
+ensemble specification hash.
 
 ### Intervention and generation boundary
 
