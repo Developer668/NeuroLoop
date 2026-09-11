@@ -71,4 +71,8 @@ and the ensemble carries its own version and specification hash. Temporal rows u
 source-duration-normalized `[0,1]` axis. Target specs support the legacy whole-creative
 emotion map, one normalized `time_window`, or multiple normalized `windows`. Scoring
 uses only intervals overlapping the requested window, duration-weights overlaps, and
-omits uncovered tails; it never substitutes whole-creative or another-segment values.
+uses interval-union coverage so overlapping rows cannot inflate support. A target
+segment with an uncovered gap, or a requested dimension supported for only part of the
+segment, is not scoreable; it never substitutes whole-creative or another-segment
+values. Source and per-dimension coverage remain visible in the temporal ensemble
+series.
