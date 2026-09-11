@@ -129,11 +129,12 @@ def _usage(chain: list[dict[str, Any]]) -> tuple[int, float]:
     return sum(int(item.get('evaluations_used') or 0) for item in chain), sum(float(item.get('compute_seconds') or 0) for item in chain)
 
 
-def _open_proposal(root_run_id: str) -> bool:
-    with engine.connect() as db:
-        rows = db.execute(text("SELECT status,run_id,specification FROM agent_proposals WHERE status IN ('proposed','approved','executing','queued')")).mappings().all()
-    with Session() as db:
-        linked_runs = {row['run_id']: db.get(Run, row['run_id']) for row in rows if row['status'] == 'queued' and row['run_id']}
+def _open_proposal(root_run_id: str, db=None) -> bool:
+    if db is None:
+        with Session() as session:
+            return _open_proposal(root_run_id, session)
+    rows = db.execute(text("SELECT status,run_id,specification FROM agent_proposals WHERE status IN ('proposed','approved','executing','queued')")).mappings().all()
+    linked_runs = {row['run_id']: db.get(Run, row['run_id']) for row in rows if row['status'] == 'queued' and row['run_id']}
     for row in rows:
         try:
             contract = json.loads(row['specification']).get('agent_contract', {})
@@ -250,9 +251,19 @@ def propose(body: Proposal) -> dict[str, Any]:
         'objective': config.get('objective'),
         'constraints': snapshot.get('constraints') or {},
     }
-    specification = {'contract': 'agent-closed-loop/v1', 'version': 1, 'owner': 'authenticated-workspace', 'proposal': body.model_dump(mode='json'), 'request': next_request.model_dump(mode='json'), 'project_snapshot': snapshot, 'agent_contract': contract, 'intervention': _intervention(body, base, request, snapshot)}
+    intervention = _intervention(body, base, request, snapshot)
+    contract['intervention'] = intervention
+    contract['intervention_digest'] = hashlib.sha256(_canonical(intervention).encode('utf-8')).hexdigest()
+    specification = {'contract': 'agent-closed-loop/v1', 'version': 1, 'owner': 'authenticated-workspace', 'proposal': body.model_dump(mode='json'), 'request': next_request.model_dump(mode='json'), 'project_snapshot': snapshot, 'agent_contract': contract, 'intervention': intervention}
     encoded = _canonical(specification)
-    with engine.begin() as db:
+    # Lock the root run before rechecking and inserting. SQLite serializes the
+    # write transaction; PostgreSQL takes a row lock on the same root.
+    with Session.begin() as db:
+        locked = db.execute(text('UPDATE runs SET heartbeat=heartbeat WHERE id=:id'), {'id': root}).rowcount
+        if locked != 1:
+            raise services.DomainError('The workflow root no longer exists; no proposal was stored')
+        if _open_proposal(root, db):
+            raise services.DomainError('This run already has an open agent proposal; review or execute it before submitting another')
         db.execute(text('INSERT INTO agent_proposals(id,version,source,specification,created_at) VALUES (:id,1,:source,:spec,:t)'), {'id': identity, 'source': body.source, 'spec': encoded, 't': now()})
     emit(base['id'], 'agent_proposal', 'Stored a typed external intervention under the frozen run contract.', proposal_id=identity, iteration=iteration, operator=body.operator)
     return get_proposal(identity)

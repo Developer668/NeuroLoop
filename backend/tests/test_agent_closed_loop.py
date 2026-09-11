@@ -1,7 +1,9 @@
 """Contract tests for the bounded external-agent continuation path."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import io
+import threading
 
 from PIL import Image
 
@@ -229,6 +231,9 @@ def test_external_agent_closed_loop_uses_recorded_fixture_evidence_only(client, 
         'operator': 'brightness_up',
         'hypothesis': 'A bounded brightness intervention may improve relative happiness evidence.',
     }).json()
+    reviewed_intervention = proposal['specification']['intervention']
+    reviewed_digest = proposal['specification']['agent_contract']['intervention_digest']
+    assert reviewed_intervention['response_gap']['actual'] == .2
     queued = client.post('/api/agent/proposals/' + proposal['id'] + '/execute', headers=headers, json={
         'approval_digest': proposal['approval_digest'],
     })
@@ -245,7 +250,7 @@ def test_external_agent_closed_loop_uses_recorded_fixture_evidence_only(client, 
 
     def fake_evaluation(identity, selected, config):
         calls['count'] += 1
-        value = .2 if calls['count'] == 1 else .8
+        value = .1 if calls['count'] == 1 else .8
         item = Evaluation(
             id=uid(),
             asset_id=selected.id,
@@ -274,6 +279,7 @@ def test_external_agent_closed_loop_uses_recorded_fixture_evidence_only(client, 
     monkeypatch.setattr(worker, 'render_candidate', lambda *args, **kwargs: worker.get_asset(args[2].id))
     monkeypatch.setattr(worker, 'planner_proposal', lambda *args, **kwargs: None)
     monkeypatch.setattr(worker, 'record_evidence', lambda *args, **kwargs: None)
+    monkeypatch.setattr(worker.CreativeStrategist, 'propose_candidates', lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('approved intervention was regenerated')))
 
     worker.process(run_id)
     result = client.get('/api/runs/' + run_id, headers=headers)
@@ -283,7 +289,10 @@ def test_external_agent_closed_loop_uses_recorded_fixture_evidence_only(client, 
     assert calls['count'] == 2
     assert data['result']['best_metric']['value'] > data['result']['baseline_metric']['value']
     assert data['experiments'][0]['decision'] == 'kept'
+    assert data['experiments'][0]['specification']['intervention'] == reviewed_intervention
+    assert data['experiments'][0]['specification']['intervention_digest'] == reviewed_digest
     assert data['provenance']['contract'] == 'run-provenance/v1'
+    assert data['provenance']['experiments'][0]['intervention_digest'] == reviewed_digest
     assert len(data['provenance']['evaluations']) == 2
 
 
@@ -353,3 +362,40 @@ def test_uncertain_proposal_state_is_visible_and_not_retried(client, headers):
     })
     assert retry.status_code == 400
     assert 'uncertain' in retry.json()['detail'].lower()
+
+
+def test_workflow_proposal_claim_is_transactional_under_reentry(client, headers, monkeypatch):
+    _, run_id, _ = _base_run(client, headers)
+    from neuroloop import agent_bridge
+
+    original_open = agent_bridge._open_proposal
+    barrier = threading.Barrier(2)
+
+    def synchronized_open(root_id, db=None):
+        if db is None:
+            barrier.wait(timeout=5)
+        return original_open(root_id, db)
+
+    monkeypatch.setattr(agent_bridge, '_open_proposal', synchronized_open)
+
+    def submit(_):
+        try:
+            return agent_bridge.propose(agent_bridge.Proposal(
+                base_run_id=run_id,
+                operator='brightness_up',
+                hypothesis='Test one bounded evidence intervention.',
+            ))
+        except Exception as exc:  # both outcomes are asserted below
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(submit, range(2)))
+
+    accepted = [item for item in outcomes if isinstance(item, dict)]
+    rejected = [item for item in outcomes if isinstance(item, Exception)]
+    assert len(accepted) == 1
+    assert len(rejected) == 1
+    assert 'open agent proposal' in str(rejected[0]).lower()
+    saved = agent_bridge.get_proposal(accepted[0]['id'])
+    assert saved['status'] == 'proposed'
+    assert saved['specification']['agent_contract']['budget_before']['evaluations_used'] == 0

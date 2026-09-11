@@ -276,13 +276,16 @@ def _provenance(row: Run, experiments: list[Experiment], evaluations: list[Evalu
     experiment_rows = []
     for experiment in experiments:
         evidence_ids = sorted(_evaluation_ids(experiment.evidence or {}))
+        specification = experiment.specification or {}
+        intervention = specification.get('intervention') if isinstance(specification.get('intervention'), dict) else specification
         experiment_rows.append({
             'id': experiment.id,
             'sequence': experiment.sequence,
             'operator': experiment.operator,
             'decision': experiment.decision,
             'asset_id': experiment.asset_id,
-            'specification_digest': _digest(experiment.specification or {}),
+            'specification_digest': _digest(specification),
+            'intervention_digest': specification.get('intervention_digest') or _digest(intervention),
             'evidence_digest': _digest(experiment.evidence or {}),
             'evaluation_ids': evidence_ids,
         })

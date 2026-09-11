@@ -203,6 +203,15 @@ def _proposal_from_experiment(
     """Load a typed pending proposal, with a compatibility path for old rows."""
 
     specification = experiment.specification if isinstance(experiment.specification,dict) else {}
+    reviewed = specification.get('intervention')
+    if isinstance(reviewed, dict):
+        try:
+            proposal = InterventionProposal.model_validate(reviewed)
+        except Exception as exc:
+            raise ValueError('Saved reviewed intervention no longer validates; continuation refused') from exc
+        if specification.get('intervention_digest') != _intervention_digest(proposal.as_dict()):
+            raise ValueError('Saved reviewed intervention digest changed; continuation refused')
+        return proposal
     try:
         return InterventionProposal.model_validate({key:value for key,value in specification.items() if key not in {'lineage','parent_id','sibling_ids','siblings'}})
     except Exception:
@@ -231,6 +240,7 @@ def _create_experiment_batch(
     proposals: list[InterventionProposal],
     baseline_score: float,
     sequence: int,
+    reviewed_intervention: bool = False,
 ) -> tuple[list[Experiment], int]:
     """Persist one A/B/C sibling group before any candidate is rendered."""
 
@@ -238,6 +248,10 @@ def _create_experiment_batch(
     next_sequence = sequence
     for proposal in proposals:
         next_sequence += 1
+        serialized = proposal.as_dict()
+        specification = dict(serialized)
+        if reviewed_intervention:
+            specification.update({'intervention': serialized, 'intervention_digest': _intervention_digest(serialized)})
         rows.append(
             Experiment(
                 id=uid(),
@@ -245,7 +259,7 @@ def _create_experiment_batch(
                 sequence=next_sequence,
                 operator=proposal.operator,
                 hypothesis=proposal.hypothesis,
-                specification=proposal.as_dict(),
+                specification=specification,
                 baseline_score=baseline_score,
             )
         )
@@ -268,6 +282,29 @@ def _create_experiment_batch(
             )
             row.specification = specification
     return rows, next_sequence
+
+
+def _intervention_digest(value: dict) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode('utf-8')).hexdigest()
+
+
+def _validated_agent_intervention(agent_contract: dict, request: dict) -> InterventionProposal | None:
+    raw = agent_contract.get('intervention')
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError('Approved external intervention is not a typed object; continuation refused')
+    try:
+        proposal = InterventionProposal.model_validate(raw)
+    except Exception as exc:
+        raise ValueError('Approved external intervention no longer validates; continuation refused') from exc
+    if _intervention_digest(proposal.as_dict()) != agent_contract.get('intervention_digest'):
+        raise ValueError('Approved external intervention digest changed; continuation refused')
+    if proposal.backend_identity != CreativeStrategist.backend_identity:
+        raise ValueError('Approved external intervention uses an unapproved strategy backend; continuation refused')
+    if proposal.operator not in (request.get('operators') or []) or proposal.hypothesis != request.get('hypothesis', ''):
+        raise ValueError('Approved external intervention no longer matches the immutable run request; continuation refused')
+    return proposal
 
 
 def _mark_invalid_experiment(identity: str, experiment_id: str, reason: str, error_type: str, evidence: dict | None = None) -> None:
@@ -304,6 +341,9 @@ def _timeline_for_evaluation(evaluation_item: Evaluation) -> dict:
 @traced('neuroloop.run')
 def execute_run(identity: str) -> None:
     run=checkpoint(identity,'Preparing evaluation contract'); config=run.config['request']; project=run.config['project_snapshot']
+    agent_contract=run.config.get('agent_contract') or {}
+    if not isinstance(agent_contract,dict): raise ValueError('Agent continuation contract is not an object')
+    approved_intervention=_validated_agent_intervention(agent_contract,config)
     original=get_asset(project['asset_id'])
     # An approved external continuation may start from the previous validated
     # winner. The bridge supplies only a managed asset ID and an immutable
@@ -363,6 +403,12 @@ def execute_run(identity: str) -> None:
     context=policy.context_id(context_data)
     with Session() as db:
         prior=db.scalars(select(Experiment).where(Experiment.run_id==identity).order_by(Experiment.sequence)).all()
+    if approved_intervention is not None:
+        approved_digest=_intervention_digest(approved_intervention.as_dict())
+        if any((row.specification or {}).get('intervention_digest') == approved_digest for row in prior if isinstance(row.specification,dict)):
+            approved_intervention=None
+        elif prior:
+            raise ValueError('Approved external intervention is missing from the saved continuation; refusing to regenerate it')
     sequence=max([x.sequence for x in prior],default=0)
     rejections=0
     lineage_decisions: dict[str, list[str]] = {}
@@ -400,38 +446,45 @@ def execute_run(identity: str) -> None:
             emit(identity,'meta_stop','Plateau detected under the fixed acceptance contract. No more renders are justified.',consecutive_rejections=rejections,policy='bounded-plateau/v1')
             raise StopRun('Two consecutive edits failed the minimum gain; stopped rather than generating indefinitely')
 
-        pending=[row for row in prior if row.decision=='proposed']
-        if pending:
-            # Resume one saved sibling lineage at a time.  An interrupted run
-            # can therefore finish its already-reserved branch without making
-            # a new proposal or changing the immutable parent.
-            lineage=(pending[0].specification or {}).get('lineage_id') if isinstance(pending[0].specification,dict) else None
-            pending=[row for row in pending if ((row.specification or {}).get('lineage_id') if isinstance(row.specification,dict) else None)==lineage]
-            batch_rows=pending[:min(3,int(remaining))]
-            proposals=[_proposal_from_experiment(row,strategist,config.get('target') if response_objective else None,current_report,timeline,prior,project['constraints']) for row in batch_rows]
-            emit(identity,'resumed_experiment','Resuming the saved sibling lineage; saved renders and evaluations are reused.',lineage_id=lineage,sibling_count=len(batch_rows))
-        else:
-            branch_limit=min(policy.MAX_BRANCHES,int(remaining))
-            choices=policy.choose_batch(context,allowed,{row.operator for row in prior},f'{identity}:{sequence}',limit=branch_limit)
-            if not choices: raise StopRun('No untested permitted operators remain')
-            policy_operators=[choice['operator'] for choice in choices]
-            proposals=strategist.propose_candidates(
-                config.get('target') if response_objective else None,
-                current_report,
-                timeline,
-                prior,
-                project['constraints'],
-                allowed_operators=policy_operators,
-                max_candidates=branch_limit,
-                seed=f'{identity}:{sequence}',
-                lineage_id=f'{identity}:lineage:{sequence+1}',
-                parent_experiment_id=best_experiment_id,
-            )
-            if not proposals: raise StopRun('No deterministic intervention proposals remain')
-            batch_rows,sequence=_create_experiment_batch(identity,proposals,best_score,sequence)
+        if approved_intervention is not None:
+            batch_rows,sequence=_create_experiment_batch(identity,[approved_intervention],best_score,sequence,reviewed_intervention=True)
             prior.extend(batch_rows)
-            for choice,proposal,row in zip(choices,proposals,batch_rows):
-                emit(identity,'hypothesis',proposal.hypothesis,operator=proposal.operator,experiment_id=row.id,lineage_id=proposal.lineage_id,branch=proposal.branch,policy=choice['source'])
+            emit(identity,'reviewed_intervention','Using the exact approved external intervention; no proposal was regenerated.',intervention_digest=_intervention_digest(approved_intervention.as_dict()),experiment_id=batch_rows[0].id)
+            proposals=[approved_intervention]
+            approved_intervention=None
+        else:
+            pending=[row for row in prior if row.decision=='proposed']
+            if pending:
+                # Resume one saved sibling lineage at a time.  An interrupted
+                # run can therefore finish its already-reserved branch without
+                # making a new proposal or changing the immutable parent.
+                lineage=(pending[0].specification or {}).get('lineage_id') if isinstance(pending[0].specification,dict) else None
+                pending=[row for row in pending if ((row.specification or {}).get('lineage_id') if isinstance(row.specification,dict) else None)==lineage]
+                batch_rows=pending[:min(3,int(remaining))]
+                proposals=[_proposal_from_experiment(row,strategist,config.get('target') if response_objective else None,current_report,timeline,prior,project['constraints']) for row in batch_rows]
+                emit(identity,'resumed_experiment','Resuming the saved sibling lineage; saved renders and evaluations are reused.',lineage_id=lineage,sibling_count=len(batch_rows))
+            else:
+                branch_limit=min(policy.MAX_BRANCHES,int(remaining))
+                choices=policy.choose_batch(context,allowed,{row.operator for row in prior},f'{identity}:{sequence}',limit=branch_limit)
+                if not choices: raise StopRun('No untested permitted operators remain')
+                policy_operators=[choice['operator'] for choice in choices]
+                proposals=strategist.propose_candidates(
+                    config.get('target') if response_objective else None,
+                    current_report,
+                    timeline,
+                    prior,
+                    project['constraints'],
+                    allowed_operators=policy_operators,
+                    max_candidates=branch_limit,
+                    seed=f'{identity}:{sequence}',
+                    lineage_id=f'{identity}:lineage:{sequence+1}',
+                    parent_experiment_id=best_experiment_id,
+                )
+                if not proposals: raise StopRun('No deterministic intervention proposals remain')
+                batch_rows,sequence=_create_experiment_batch(identity,proposals,best_score,sequence)
+                prior.extend(batch_rows)
+                for choice,proposal,row in zip(choices,proposals,batch_rows):
+                    emit(identity,'hypothesis',proposal.hypothesis,operator=proposal.operator,experiment_id=row.id,lineage_id=proposal.lineage_id,branch=proposal.branch,policy=choice['source'])
 
         outcomes=[]
         for row,proposal in zip(batch_rows,proposals):
