@@ -1,4 +1,5 @@
 """Local INT8 SafeTensors loader. Does not execute Hugging Face repository code."""
+import inspect
 import json
 from pathlib import Path
 import yaml
@@ -10,6 +11,28 @@ from safetensors.torch import load_file
 from transformers import VJEPA2Config, VJEPA2Model, AutoVideoProcessor
 
 ROOT = Path(__file__).resolve().parent
+
+
+def _supports_safetensors_backend():
+    """Return whether this SafeTensors runtime exposes an alternate I/O backend."""
+    try:
+        return 'backend' in inspect.signature(load_file).parameters
+    except (TypeError, ValueError):
+        # Keep compatibility with older/binary-wrapped SafeTensors releases.
+        return False
+
+
+def _load_video_state_dict(path, device):
+    """Load video weights without a CPU-to-MPS duplicate when the runtime allows it.
+
+    SafeTensors' ``pread`` backend avoids the mmap-backed file view that can remain
+    resident in Apple Silicon's unified memory while a second MPS copy is built.
+    Older runtimes retain the previous CPU load and explicit ``model.to(device)``
+    path rather than changing the checkpoint or dtype contract.
+    """
+    if device == 'mps' and _supports_safetensors_backend():
+        return load_file(path, device=device, backend='pread'), True
+    return load_file(path, device='cpu'), False
 
 
 def resolve_device(device='auto'):
@@ -54,8 +77,14 @@ def load_video_model(repo_dir=ROOT, device='auto'):
         for name, spec in metadata['linear_modules'].items():
             parent, _, child = name.rpartition('.')
             setattr(model.get_submodule(parent), child, Int8Linear(**spec))
-    model.load_state_dict(load_file(folder / 'model.safetensors'), strict=True, assign=True)
-    model = model.to(device).eval()
+    state_dict, loaded_on_device = _load_video_state_dict(folder / 'model.safetensors', device)
+    model.load_state_dict(state_dict, strict=True, assign=True)
+    # ``assign=True`` makes the module reference the loaded tensors. Drop the
+    # temporary mapping before any fallback device copy so it adds no extra refs.
+    del state_dict
+    if not loaded_on_device:
+        model = model.to(device)
+    model = model.eval()
     processor = AutoVideoProcessor.from_pretrained(folder, local_files_only=True, trust_remote_code=False)
     return model, processor
 
@@ -103,6 +132,9 @@ def load_quantized_tribev2(repo_dir=ROOT, device='auto', cache_folder=None):
             inputs = inputs.to(device=self.model.device, dtype=torch.bfloat16)
             with torch.inference_mode():
                 result = self.model(**inputs, output_hidden_states=True, skip_predictor=True)
+            # The processor inputs are no longer needed while the device-side
+            # hidden states are copied to their required CPU representation.
+            del inputs
             # Neuralset converts features to numpy, which does not support BF16.
             # Pooling in Neuralset happens on CPU. Do not hold or concatenate all
             # 41 FP32 token layers on the laptop GPU alongside text/audio models.
@@ -114,7 +146,9 @@ def load_quantized_tribev2(repo_dir=ROOT, device='auto', cache_folder=None):
     tribe = TribeModel.from_pretrained(
         runtime, checkpoint_name='../best.ckpt', device=device, cache_folder=cache_folder,
         config_update={'data.video_feature.frequency': 2.0,
-                       'data.video_feature.image.batch_size': 4})
+                       'data.video_feature.image.batch_size': 1,
+                       'data.batch_size': 1,
+                       'data.num_workers': 0})
     # TRIBE concatenates modalities at identical time indices. Keep the official
     # 2 Hz shared grid; video-only 1.5 Hz produces 150 vs 200 samples per segment.
     return tribe

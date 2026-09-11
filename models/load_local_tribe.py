@@ -19,6 +19,11 @@ def load_local_tribe(device='auto'):
     tribe.data.audio_feature.device = 'cpu'
     tribe.data.image_feature.image.model_name = str(ROOT / 'vision/dinov2-large')
     tribe.data.video_feature.image.device = device
+    # Keep direct callers on the laptop-safe path too; the application applies
+    # the same dataset settings after loading as a second line of defense.
+    tribe.data.batch_size = 1
+    tribe.data.num_workers = 0
+    tribe.data.video_feature.image.batch_size = 1
     return tribe
 
 if __name__ == '__main__':
