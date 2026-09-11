@@ -86,6 +86,8 @@ Start with the [documentation index and completion status](docs/README.md). All 
 
 This repository contains application source, model download/quantization scripts, pinned runtime inputs, vendored runtime source and licenses, brand assets and documentation. It does **not** contain downloaded model weights, Python environments, `.env` credentials, the local SQLite database, uploaded media, saved predictions, crash dumps or private audit receipts. Paths under `data/` in the audit refer to evidence on the original computer, not downloadable GitHub attachments.
 
+The local model bundle from the companion NeuroLoop 2 folder has been restored into the paths used by this checkout. Run `python scripts/verify_local_assets.py` to verify it without starting inference. The large licensed weights remain ignored by Git, so they survive pulls and do not create merge conflicts; a fresh clone still needs the asset bundle or the pinned download scripts. See [the partner setup guide](PARTNER-START-HERE.md) and [local asset handoff](docs/LOCAL-ASSETS.md) for the exact boundary.
+
 A fresh clone is not a ready-to-run installation. Restore or obtain the permitted model assets, provision the pinned runtimes using [runtime documentation](docs/RUNTIME-PATCHES.md), configure private local settings and follow [connection setup](docs/CONNECTIONS.md). The existing laptop remains under the [execution hold](docs/CRASH-RECOVERY.md); publishing source does not clear that hold or any release gate.
 
 ## Verify without running a model

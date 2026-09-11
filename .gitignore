@@ -1,6 +1,16 @@
 .env
 .env.*
 !.env.example
+
+# Operating-system and downloader metadata
+.DS_Store
+**/CACHEDIR.TAG
+**/*.metadata
+
+# Model downloads must stay under models/, not the backend package.
+backend/config.json
+backend/gitignore
+
 .venv/
 .runtimes/
 infrastructure/vendor/**/.git/
@@ -23,7 +33,16 @@ infrastructure/vendor/wandb-mcp-server/*
 **/.next/
 **/__pycache__/
 **/.pytest_cache/
+
+# Runtime output stays local, but the verified static cortical geometry is
+# safe to share with every checkout so the anatomy view works after a clone.
 data/
+!data/
+data/*
+!data/geometry/
+!data/geometry/*.json
+!data/geometry/*.gii.gz
+
 cache/
 models/*
 !models/*.py
