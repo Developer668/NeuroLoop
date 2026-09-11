@@ -165,10 +165,17 @@ def update_project(identity: str,body: ProjectCreate): return services.update_pr
 
 @app.get('/api/projects/{identity}')
 def project(identity: str):
-    with Session() as db:
-        row=db.get(Project,identity)
-        if not row: raise HTTPException(404,'Project not found')
-        return as_dict(row)
+    try:
+        return services.get_project(identity)
+    except services.DomainError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+@app.get('/api/projects/{identity}/context')
+def project_context(identity: str):
+    try:
+        return services.project_context(identity)
+    except services.DomainError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 @app.post('/api/assets',status_code=201)
 async def upload(file: UploadFile=File(...)):
@@ -270,10 +277,10 @@ async def stream(identity: str,request: Request):
 
 @app.get('/api/evaluations/{identity}')
 def evidence(identity: str):
-    with Session() as db:
-        row=db.get(Evaluation,identity)
-        if not row: raise HTTPException(404,'Evaluation not found')
-        return as_dict(row,('prediction_path',))
+    try:
+        return services.get_evidence(identity)
+    except services.DomainError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 @app.get('/api/evaluations/{identity}/frame')
 def neural_frame(identity: str,index: int=0,reference: str | None=None):

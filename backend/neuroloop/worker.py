@@ -305,6 +305,16 @@ def _timeline_for_evaluation(evaluation_item: Evaluation) -> dict:
 def execute_run(identity: str) -> None:
     run=checkpoint(identity,'Preparing evaluation contract'); config=run.config['request']; project=run.config['project_snapshot']
     original=get_asset(project['asset_id'])
+    # An approved external continuation may start from the previous validated
+    # winner. The bridge supplies only a managed asset ID and an immutable
+    # metadata snapshot; the normal evaluator, gates and scoring remain in
+    # charge of the rest of this function.
+    starting_asset_id=run.config.get('starting_asset_id')
+    if starting_asset_id:
+        original=get_asset(starting_asset_id)
+        snapshot=(run.config.get('agent_contract') or {}).get('starting_asset_snapshot')
+        if isinstance(snapshot, dict):
+            original.details=dict(snapshot.get('details') or original.details)
     snapshots=run.config.get('asset_metadata_snapshots',{})
     if original.id in snapshots: original.details=snapshots[original.id]
     config={**config,'transcript':config.get('transcript') or original.details.get('transcript',[])}

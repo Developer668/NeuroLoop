@@ -1,8 +1,11 @@
 """Additional agent tools over the shared, validated domain services."""
 import anyio
+from typing import Annotated
+from pydantic import Field
 from .schemas import RunCreate,CreativeCreate
 from . import services
 from .comparison import compare_evaluations
+from .agent_bridge import AgentOperator, AgentSource
 
 def register(mcp):
     @mcp.tool()
@@ -12,14 +15,33 @@ def register(mcp):
         return {'receipts':receipts()}
 
     @mcp.tool()
-    def propose_agent_experiment(base_run_id:str,operator:str,hypothesis:str,source:str='local agent') -> dict:
-        """Prepare a version-1 proposal under a prior run's frozen objective/constraints. Does not execute. Review the returned contract and digest."""
+    def inspect_project(project_id: Annotated[str, Field(min_length=1, max_length=120)]) -> dict:
+        """Read a bounded project brief, constraints, managed assets and run summaries."""
+        return services.project_context(project_id)
+
+    @mcp.tool()
+    def propose_agent_experiment(
+        base_run_id: Annotated[str, Field(min_length=1, max_length=120)],
+        operator: AgentOperator,
+        hypothesis: Annotated[str, Field(min_length=1, max_length=1000)],
+        source: AgentSource = 'local agent',
+    ) -> dict:
+        """Prepare one typed intervention under a prior run's frozen objective, budget, operators and constraints. Does not execute; review the returned digest."""
         from .agent_bridge import propose,Proposal
         return propose(Proposal(base_run_id=base_run_id,operator=operator,hypothesis=hypothesis,source=source))
 
     @mcp.tool()
-    def execute_agent_proposal(proposal_id:str,approval_digest:str) -> dict:
-        """Execute an explicitly reviewed proposal using its exact digest. Same bounded domain queue, GPU lock and keep/revert rules as the UI."""
+    def get_agent_proposal(proposal_id: Annotated[str, Field(min_length=1, max_length=120)]) -> dict:
+        """Read a proposal's exact typed specification, digest, state and recovery guidance."""
+        from .agent_bridge import get_proposal
+        return get_proposal(proposal_id)
+
+    @mcp.tool()
+    def execute_agent_proposal(
+        proposal_id: Annotated[str, Field(min_length=1, max_length=120)],
+        approval_digest: Annotated[str, Field(pattern=r'^[a-f0-9]{64}$')],
+    ) -> dict:
+        """Queue an explicitly reviewed proposal using its exact digest. The shared guard, queue, renderer, evaluator and ledger remain authoritative."""
         from .agent_bridge import execute
         return execute(proposal_id,approval_digest)
 
@@ -52,7 +74,7 @@ def register(mcp):
         return await anyio.to_thread.run_sync(services.create_creative,spec)
 
     @mcp.tool()
-    def run_experiment(project_id:str,operator:str,max_evaluations:int=4,max_seconds:int=900,min_gain:float=.005,no_speech:bool=False,allow_static_presentation:bool=False,idempotency_key:str|None=None) -> dict:
-        """Queue one permitted edit, preserving the fixed goal and budget. No speech may be asserted only for genuinely speech-free media."""
-        request=RunCreate(project_id=project_id,mode='optimize',operators=[operator],max_evaluations=max_evaluations,max_seconds=max_seconds,min_gain=min_gain,no_speech=no_speech,allow_static_presentation=allow_static_presentation,target_score=1.0)
+    def run_experiment(project_id: Annotated[str, Field(min_length=1, max_length=120)], operator: AgentOperator, max_evaluations: Annotated[int, Field(ge=1, le=4)]=4, max_seconds: Annotated[int, Field(ge=30, le=900)]=900, min_gain: Annotated[float, Field(ge=0.0001, le=0.25)]=.005, no_speech:bool=False, allow_static_presentation:bool=False, idempotency_key:Annotated[str|None, Field(max_length=100)]=None) -> dict:
+        """Queue one permitted edit through the shared bounded run service; no external code or provider call is accepted."""
+        request=RunCreate(project_id=project_id,mode='optimize',operators=[operator],max_evaluations=max_evaluations,max_seconds=max_seconds,min_gain=min_gain,allow_static_presentation=allow_static_presentation,no_speech=no_speech,target_score=1.0)
         return services.create_run(request,idempotency_key)
