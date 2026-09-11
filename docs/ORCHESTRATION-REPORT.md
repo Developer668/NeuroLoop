@@ -35,13 +35,13 @@ Every workstream uses `gpt-5.6-luna` with maximum reasoning in an isolated Codex
 | # | Workstream | Dependencies | Status | Guardian verdict |
 |---|---|---|---|---|
 | 1 | Protected baseline plus real-model/MPS memory/E2E investigation | baseline | BLOCKED | accepted investigation; real-model release gate blocked |
-| 2 | Scientific response stack: TRIBE/Kragel/TSAM/ensemble, temporal targets, provenance | baseline | COMPLETE | accepted at `3b2b4e3` |
-| 3 | CreativeStrategist, typed interventions, A/B/C branching, policy learning | 2 contracts | ACTIVE | pending review |
-| 4 | CreativeConstraints plus media quality/corruption gates | 2 contracts | ACTIVE | pending review |
-| 5 | Complete MCP closed-loop contract and external-agent iteration | 2, 3, 4 | QUEUED | pending |
+| 2 | Scientific response stack: TRIBE/Kragel/TSAM/ensemble, temporal targets, provenance | baseline | COMPLETE | accepted with revision at `11c0b6a` |
+| 3 | CreativeStrategist, typed interventions, A/B/C branching, policy learning | 2 contracts | COMPLETE | accepted at `35d6eec` |
+| 4 | CreativeConstraints plus media quality/corruption gates | 2 contracts | COMPLETE | accepted at `986f2a0`; integration seam `707e1e3` |
+| 5 | Complete MCP closed-loop contract and external-agent iteration | 2, 3, 4 | ACTIVE | Luna worktree provisioned |
 | 6 | MCP adversarial/security/reliability and REST/MCP parity | 5 | QUEUED | pending |
 | 7 | ImprovementBrief/Copilot and grounded Neuro assistant | 2, 3, 5 | QUEUED | pending |
-| 8 | Worker recovery, immutable cache/artifacts, execution guard, reproducibility | 2, 3, 4 | QUEUED | pending |
+| 8 | Worker recovery, immutable cache/artifacts, execution guard, reproducibility | 2, 3, 4 | ACTIVE | Luna worktree provisioned |
 | 9 | Browser E2E, export bundle, marimo, modalities, product completeness | 5, 7, 8 | QUEUED | pending |
 | 10 | Sponsor/provider truth, clean-install/performance audit, independent final release audit | all prior | QUEUED | pending |
 
@@ -60,7 +60,10 @@ Every workstream uses `gpt-5.6-luna` with maximum reasoning in an isolated Codex
 
 - Baseline rerun on the integration worktree with the pinned app runtime: `117 passed, 1 skipped`. A clean ad-hoc runtime also exposed missing `data/tmp` bootstrapping and FFmpeg discovery assumptions; those are assigned to workstream 8.
 - Luna W1 task `01a08fef-23f5-7121-9f4c-2bb547fa31a5` returned `BLOCKED` at `75d560dd27494d97e5bc69d5808bd12b25a2284d`. Guardian reviewed the complete diff, ran profiler compile/self-test, verified it imports no model code and signals no processes, and integrated it as `a78c670`. The active MPS quarantine recorded 299,040,768 bytes available versus the 1.5 GiB reserve; no fresh full response loop exists.
-- Luna W2 task `01a08fef-23f5-7121-9f4c-2bd112c9d3b5` returned `COMPLETE` at `45ac45e2563cc694b58d8ad50805bc2819702361`. Guardian inspected the scientific contracts, reran 24 focused tests and the full suite (`127 passed, 1 skipped`), then integrated it as `3b2b4e3`.
-- Luna W3 task `01a09003-ace0-7311-bacd-aee0b765a847` (client setup `client-new-thread:8275d940-d91e-47ab-b91f-79b5faa0777e`) is active in `/Users/adityadas/.codex/worktrees/8368/NeuroLoop` from reviewed integration commit `3b2b4e3`.
-- Luna W4 task `01a09003-ace0-7311-bacd-aefbd7ae944b` (client setup `client-new-thread:70731fe4-108f-4cc2-b123-16d483fab812`) is active in `/Users/adityadas/.codex/worktrees/c7e1/NeuroLoop` from reviewed integration commit `3b2b4e3`.
+- Luna W2 task `01a08fef-23f5-7121-9f4c-2bd112c9d3b5` returned `COMPLETE` at `45ac45e2563cc694b58d8ad50805bc2819702361`. Guardian inspection found overlapping windows could double-count support and partial target coverage could still yield a misleading score. The focused revision `961259815d38630e666e9709d6fb474c77aa1b1d` adds interval-union and per-dimension coverage plus fail-closed partial support; integrated as `11c0b6a`. Combined suite: `144 passed, 1 skipped`.
+- Luna W3 task `01a09003-ace0-7311-bacd-aee0b765a847` returned `COMPLETE` at `58121e5d53ff588d7401761427d344352dd077d0`. Guardian inspected the strategy, policy, worker, and tests, reran focused and full tests, and integrated it as `35d6eec`.
+- Luna W4 task `01a09003-ace0-7311-bacd-aefbd7ae944b` was interrupted by the account Luna quota after producing a clean worktree. Guardian preserved and inspected all files, reran its nine focused tests plus the full suite, committed the accepted scope as `363160b3d6135adb5dbb1993f044a89385dcdda5`, and integrated it as `986f2a0`. A formal report retry is pending on the same task, not a duplicate workstream.
+- Guardian integration commit `707e1e3` wires W4's real decoded-media/declared-constraint report ahead of W3's model evaluation, removes placeholder constraint evidence, and adds a regression proving a rejected candidate never reaches the evaluator. Combined suite at that gate: `141 passed, 1 skipped`; after the W2 revision: `144 passed, 1 skipped`.
+- Luna W5 setup `client-new-thread:35715b1d-02ec-41a9-a104-17ad2b01c124` is provisioned from reviewed integration commit `11c0b6a` for the MCP closed loop.
+- Luna W8 setup `client-new-thread:89cc7a86-d0f1-4a78-a451-7e6858e043e0` is provisioned from reviewed integration commit `707e1e3` for recovery/cache/guard/reproducibility and the clean-checkout/cache-identity findings.
 - The original checkout remains dirty and untouched. Protected and completed worktrees remain preserved; no model/data/cache/database/quarantine asset was removed or overwritten.
