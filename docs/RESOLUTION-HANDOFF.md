@@ -5,13 +5,14 @@ maintainers and no credentials were fetched or printed during the audit.
 
 ## Kragel: what to obtain
 
-Local evidence: `models/brain_readouts/kragel2015/compatibility.json` and retained
-sources in `models/brain_readouts/kragel2015/source`.
+The current checkout contains no Kragel source files or compatibility evidence.
+`models/brain_readouts/kragel2015/source` is a proposed install target only.
 
-The downloaded hemisphere arrays contain 32,492 scalars each; TRIBE uses fsaverage5
-with 10,242 vertices each. The local mesh-named files contain scalar arrays, not
-the geometry/registration necessary to establish correspondence. A filename or
-vertex count cannot identify a verified mapping.
+The published Kragel surface arrays are expected to contain 32,492 scalars per
+hemisphere; TRIBE uses fsaverage5 with 10,242 vertices each. The current checkout
+contains none of those files. When supplied, mesh-named files must be treated as
+scalar arrays—not as the geometry/registration necessary to establish
+correspondence. A filename or vertex count cannot identify a verified mapping.
 
 Start with the [CANlab pattern description](https://github.com/canlab/Neuroimaging_Pattern_Masks/blob/master/Multivariate_signature_patterns/2015_Kragel_emotionClassificationBPLS/contents_description.md),
 the [2015 paper DOI](https://doi.org/10.1093/scan/nsv032), and the
@@ -36,7 +37,7 @@ Suggested message to copy and send yourself:
 
 > We are evaluating the seven Kragel 2015 emotion patterns in a local research
 > application. Our target is TRIBE v2 fsaverage5 cortical predictions: 10,242
-> vertices per hemisphere. The retained surface patterns have 32,492 values per
+> vertices per hemisphere. The published surface patterns are expected to have 32,492 values per
 > hemisphere. Could you provide their exact source surface, medial-wall handling,
 > registration geometry/transforms, intended scoring weights/procedure and a known
 > reference example? We will not interpret arbitrary resampling or successful code
@@ -44,17 +45,19 @@ Suggested message to copy and send yourself:
 
 Deliver the response/files under `models/brain_readouts/kragel2015/registration`
 when available, with source URLs and hashes. This is a proposed destination, not
-a claim that those files already exist. Acceptance requires alignment checks,
-hemisphere/mask checks, reference-score reproduction and held-out transfer results.
-Keep the decoder unavailable until that evidence exists.
+a claim that those files already exist. Acceptance requires the seven source
+volume pairs, alignment checks, hemisphere/mask checks, reference-score
+reproduction and held-out transfer results. Keep the decoder unavailable until
+the assets and evidence exist.
 
 ## TSAM: why it is still experimental
 
-Strict checkpoint loading and CPU execution are implemented. The eight-class order
-follows the pinned source implementation: Anger, Contempt, Disgust, Fear, Happiness,
-Neutral, Sadness, Surprise. Some model/dataset card text lists seven categories;
-obtain confirmation against the precise checkpoint and split files before using
-class labels as validated conclusions.
+The strict checkpoint-loading and CPU adapter remain in code, but the current
+checkout contains no TSAM checkpoint or pinned source tree. Supply the expected
+files later, then verify the eight-class order from the precise checkpoint and
+source implementation: Anger, Contempt, Disgust, Fear, Happiness, Neutral, Sadness,
+Surprise. Some model/dataset card text lists seven categories; do not use either
+list as a validated conclusion until the supplied files are checked.
 
 Sources:
 

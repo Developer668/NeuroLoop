@@ -45,15 +45,16 @@ http://localhost:2718 is the actual local marimo application. `research/lab.py` 
 
 ## Deferred integrations
 
-`NEUROLOOP_PLANNER_ENABLED=false` remains in effect. W&B Inference will be connected later; no paid planner request or free-form chat model is enabled. The dedicated Neuro page runs documented local evidence commands and links to MCP. Kragel and TSAM are now wired as experimental response sources. CoreWeave generation/compute, Ideogram 4, MiniMax H3 and TypeSafe remain unavailable until the corresponding access is actually configured.
+`NEUROLOOP_PLANNER_ENABLED=false` remains in effect. W&B Inference will be connected later; no paid planner request or free-form chat model is enabled. The dedicated Neuro page runs documented local evidence commands and links to MCP. Kragel and TSAM retain optional integration scaffolding, but their assets are absent from the current checkout; capability status reports them missing and requests fail closed until they are installed and validated. CoreWeave generation/compute, Ideogram 4, MiniMax H3 and TypeSafe remain unavailable until the corresponding access is actually configured.
 
 Official references: [Weave](https://docs.wandb.ai/weave/quickstart), [ARIA](https://docs.wandb.ai/aria/overview), [Launch](https://docs.wandb.ai/platform/launch/create-and-deploy-jobs), [W&B MCP](https://github.com/wandb/wandb-mcp-server), [marimo plotting](https://docs.marimo.io/api/plotting/).
 
 ## September 11 build boundary
 
 The response-target loop does not depend on sponsor generation credits. Local controlled
-interventions, TRIBE, Kragel, TSAM, the experiment ledger, website and NeuroLoop MCP can
-exercise the full evaluate -> intervene -> re-evaluate -> retain/revert loop now.
+interventions, TRIBE, the experiment ledger, website and NeuroLoop MCP retain the
+TRIBE-only workflow. Kragel and TSAM are future optional branches and cannot be
+included until their assets and validation evidence are supplied.
 
 Sponsor-dependent creative generation is deliberately not claimed as implemented:
 

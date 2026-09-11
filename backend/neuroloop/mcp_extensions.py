@@ -1,4 +1,4 @@
-"""Additional agent tools over the shared, validated domain services."""
+"""Additional agent tools over the shared, path-checked domain services."""
 import anyio
 from .schemas import RunCreate,CreativeCreate
 from . import services
@@ -31,7 +31,7 @@ def register(mcp):
 
     @mcp.tool()
     def get_system_status() -> dict:
-        """Read local GPU temperature, free memory and RAM telemetry. This is not a stability guarantee."""
+        """Read local GPU temperature, free memory and RAM telemetry; use get_capabilities for asset readiness."""
         from .hardware import hardware_status
         return hardware_status()
 

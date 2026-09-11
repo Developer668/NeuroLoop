@@ -11,6 +11,92 @@ from .media import inspect_media, thumbnail, digest, compose, SUFFIXES
 class DomainError(ValueError):
     pass
 
+
+def _readout_requirements(root: Path) -> dict[str, tuple[Path, ...]]:
+    """Return the filesystem contract for optional readouts.
+
+    This is deliberately a path-only check. It does not import a model,
+    deserialize a checkpoint, or attempt inference. The optional adapters can
+    be installed later without changing the TRIBE-only service path.
+    """
+    tsam_root = root / 'models/emotion/tsam'
+    kragel_root = root / 'models/brain_readouts/kragel2015/source'
+    kragel_emotions = ('amused', 'angry', 'content', 'fearful', 'neutral', 'sad', 'surprised')
+    return {
+        'tsam': (
+            tsam_root / 'weights/tsam_weights.tar',
+            tsam_root / 'source-code/config/default.json',
+            tsam_root / 'source-code/lib/model/backbone.py',
+            tsam_root / 'source-code/lib/model/model.py',
+            tsam_root / 'source-code/lib/model/prepare_input.py',
+            tsam_root / 'source-code/lib/dataset/video.py',
+        ),
+        'kragel': tuple(
+            path
+            for emotion in kragel_emotions
+            for path in (
+                kragel_root / f'mean_3comp_{emotion}_group_emotion_PLS_beta_BSz_10000it.hdr',
+                kragel_root / f'mean_3comp_{emotion}_group_emotion_PLS_beta_BSz_10000it.img',
+            )
+        ) + tuple(
+            root / 'data/geometry' / f'{surface}_{hemisphere}.gii.gz'
+            for surface in ('pial', 'white')
+            for hemisphere in ('left', 'right')
+        ),
+    }
+
+
+def _relative_path(root: Path, path: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def readout_asset_status(root: Path | None = None) -> dict[str, dict]:
+    """Report optional readout assets from paths only.
+
+    ``ready`` means that the files required by the current adapters exist. It
+    does not mean that the readout is scientifically validated or licensed for
+    commercial use. Missing files are returned as repository-relative paths so
+    clients can explain exactly what must be installed later.
+    """
+    root = Path(root or settings().root)
+    requirements = _readout_requirements(root)
+    result = {}
+    for name, paths in requirements.items():
+        missing = [_relative_path(root, path) for path in paths if not path.is_file()]
+        if not missing:
+            # Preserve the status strings consumed by the existing UI. The
+            # separate ``validation`` field keeps technical availability from
+            # being mistaken for scientific validation.
+            status = 'experimental_weights_present' if name == 'tsam' else 'experimental_ready'
+        elif name == 'tsam' and not (root / 'models/emotion/tsam/weights/tsam_weights.tar').is_file():
+            status = 'missing_weights'
+        else:
+            status = 'missing_assets'
+        result[name] = {
+            'status': status,
+            'ready': not missing,
+            'required': [_relative_path(root, path) for path in paths],
+            'missing': missing,
+            'validation': 'unvalidated',
+        }
+    return result
+
+
+def _require_requested_readouts(body: RunCreate, root: Path) -> None:
+    requested = (('TSAM', 'tsam', body.include_tsam), ('Kragel', 'kragel', body.include_kragel))
+    status = readout_asset_status(root)
+    for label, name, selected in requested:
+        if selected and not status[name]['ready']:
+            missing = ', '.join(status[name]['missing'])
+            raise DomainError(
+                f'{label} readout was requested, but required assets are missing: {missing}. '
+                f'Install the {label} assets later before requesting this readout.'
+            )
+
+
 def capabilities() -> dict:
     s=settings(); root=s.root
     assets=[('TRIBE brain weights',root/'tribev2-balanced-qv-local/best.ckpt'),('INT8 video encoder',root/'tribev2-balanced-qv-local/quantized_video/model.safetensors'),('NF4 text encoder',root/'models/text/llama-3.2-3b-unsloth-q4/model.safetensors'),('Audio encoder',root/'models/audio/w2v-bert-2.0/model.safetensors')]
@@ -18,12 +104,12 @@ def capabilities() -> dict:
         latest=db.scalar(select(Evaluation).order_by(Evaluation.created_at.desc()).limit(1))
         verification={'evaluation_id':latest.id,'profile':latest.profile,'created_at':latest.created_at} if latest else None
     from .execution_guard import execution_status
-    from .kragel import status as kragel_status
     from .generation import statuses as generation_statuses
+    readouts=readout_asset_status(root)
     return {'product':'NeuroLoop','version':'0.1.0','execution':execution_status(),'deployment':'single-workspace authenticated local service','training':False,'models':[{'name':name,'status':'downloaded' if path.is_file() else 'missing'} for name,path in assets],
       'tribe':{'status':'weights_present' if all(p.is_file() for _,p in assets) else 'missing_weights','last_technical_test':verification,'meaning':'Predicted average-subject cortical response; not thoughts or purchase intent.'},
-      'tsam':{'status':'experimental_weights_present' if (root/'models/emotion/tsam/weights/tsam_weights.tar').is_file() else 'missing_weights','reason':'Independent CPU audiovisual readout. The staged macOS model runtime now includes its pinned dependencies; each requested evaluation still fails closed if strict checkpoint loading or preprocessing fails. Outputs are uncalibrated relative evidence.'},
-      'kragel':kragel_status(),
+      'tsam':{**readouts['tsam'],'reason':'Independent CPU audiovisual readout. Install the checkpoint and pinned source tree later; outputs remain uncalibrated relative evidence and research/non-commercial restrictions apply.'},
+      'kragel':{**readouts['kragel'],'reason':'Published pattern-expression scaffold only. Install the seven source volume pairs later; registration, scoring and transfer remain scientifically unvalidated and upstream terms apply.'},
       'generation_providers':generation_statuses(),
       'modalities':{'video':'neural analysis and bounded controlled edits','image':'explicit experimental repeated-frame presentation','audio':'audio response; local speech transcription or supplied timed words','text':'requires explicit timed-word transcript'},
       'asr':{'status':'available' if (root/'models/preprocessing/faster-whisper-small/model.bin').exists() else 'not_installed','purpose':'Speech preprocessing only; not another content judge.'},
@@ -74,6 +160,7 @@ def update_project(identity: str,body: ProjectCreate) -> dict:
         return as_dict(item)
 
 def create_run(body: RunCreate,key: str | None=None,expected_project:dict|None=None) -> dict:
+    _require_requested_readouts(body, settings().root)
     from .execution_guard import execution_status
     if execution_status()['paused']:
         raise DomainError('Model execution is paused after a Windows graphics crash. Saved results remain available. Resolve the crash investigation before enabling another GPU run.')
