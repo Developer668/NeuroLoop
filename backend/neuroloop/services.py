@@ -68,7 +68,8 @@ def update_project(identity: str,body: ProjectCreate) -> dict:
         return as_dict(item)
 
 def create_run(body: RunCreate,key: str | None=None,expected_project:dict|None=None) -> dict:
-    if (settings().data/'inference-quarantine.json').is_file():
+    from .execution_guard import execution_status
+    if execution_status()['paused']:
         raise DomainError('Model execution is paused after a Windows graphics crash. Saved results remain available. Resolve the crash investigation before enabling another GPU run.')
     key=key or uid()
     if len(key)>100: raise DomainError('Idempotency key is too long')

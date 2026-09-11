@@ -4,8 +4,26 @@ These controls reduce exposure; they do not diagnose or prevent driver failures.
 Reviewing saved data never requires clearing the hold.
 """
 import json
+import os
+import sys
 from .config import settings
 from .persistence import atomic_json
+
+
+def mac_mps_override_enabled() -> bool:
+    """Allow only an explicit Apple Silicon test to bypass the Windows hold."""
+    return sys.platform == 'darwin' and os.getenv('NEUROLOOP_ALLOW_MPS_INFERENCE', '').lower() in {'1', 'true', 'yes'}
+
+
+def memory_reserve_bytes() -> int:
+    """Return the minimum free RAM allowed for the current bounded run."""
+    reserve_gib = 3.0
+    if mac_mps_override_enabled():
+        try:
+            reserve_gib = min(3.0, max(1.0, float(os.getenv('NEUROLOOP_MPS_MEMORY_RESERVE_GIB', '1.5'))))
+        except ValueError:
+            reserve_gib = 3.0
+    return int(reserve_gib * 1024**3)
 
 
 def execution_status():
@@ -17,6 +35,8 @@ def execution_status():
         reason = record.get('reason', 'Execution hold requires review')
     except (OSError, ValueError):
         reason = 'Execution hold could not be read; review is required'
+    if mac_mps_override_enabled():
+        return {'paused': False, 'reason': reason, 'hold_override': 'explicit Apple Silicon MPS test; Windows hold preserved'}
     return {'paused': True, 'reason': reason}
 
 
@@ -26,13 +46,19 @@ def require_execution_enabled():
 
 
 def pressure_reason(state):
+    if state.get('accelerator') in {'mps', 'cpu'}:
+        reserve=memory_reserve_bytes()
+        if state['ram_available_bytes'] < reserve:
+            return f'Available system memory fell below the {reserve / 1024**3:.1f} GiB execution reserve'
+        return None
     gpu = state.get('gpu')
     if not gpu:
         return 'GPU telemetry became unavailable during execution'
     if gpu['temperature_c'] >= 82:
         return 'GPU reached the conservative 82°C execution limit'
-    if state['ram_available_bytes'] < 3 * 1024**3:
-        return 'Available system memory fell below the 3 GiB execution reserve'
+    reserve=memory_reserve_bytes()
+    if state['ram_available_bytes'] < reserve:
+        return f'Available system memory fell below the {reserve / 1024**3:.1f} GiB execution reserve'
     return None
 
 

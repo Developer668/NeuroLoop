@@ -8,5 +8,6 @@ opencv-python-headless
 scipy
 
 ./infrastructure/vendor/moviepy
+imageio-ffmpeg>=0.6,<1
 setuptools==81.0.0
 ./infrastructure/wheels/en_core_web_lg-3.8.0-py3-none-any.whl

@@ -5,6 +5,7 @@ There is no generated Python execution and no model-server shell command.
 """
 from __future__ import annotations
 import gc, hashlib, json, os, sys, time, subprocess
+import platform
 from pathlib import Path
 from functools import lru_cache
 from .persistence import atomic_json, atomic_numpy
@@ -26,6 +27,7 @@ def profile_id() -> str:
         try: version=importlib.metadata.version(package)
         except importlib.metadata.PackageNotFoundError: version='missing'
         h.update((package+'=='+version).encode())
+    h.update(('platform='+platform.system()+'-'+platform.machine()).encode())
     return 'tribe-local-int8-nf4-'+h.hexdigest()[:16]
 
 def _transcribe(path: Path) -> list[dict]:
@@ -86,6 +88,7 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
     import numpy as np
     import pandas as pd
     import torch
+    from .device import resolve_device
     from neuralset.events.utils import standardize_events
     from neuralset.events.transforms import AddText,AddSentenceToWords,AddContextToWords,RemoveMissing
     root=settings().root.resolve(); path=path.resolve()
@@ -93,11 +96,13 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
     if not output.resolve().is_relative_to(root/'data'): raise ValueError('Invalid result directory')
     output.mkdir(parents=True,exist_ok=True)
     os.environ['HF_HUB_OFFLINE']='1'; os.environ['TRANSFORMERS_OFFLINE']='1'; os.environ['TOKENIZERS_PARALLELISM']='false'
-    if not torch.cuda.is_available(): raise RuntimeError('CUDA is unavailable; synthetic replacement results are forbidden')
-    # Bound allocator pressure on a laptop sharing its GPU with the desktop.
-    # This is not a remedy for a kernel/driver fault; OOM remains a reported failure.
-    torch.cuda.set_per_process_memory_fraction(0.75)
-    torch.set_num_threads(6); torch.cuda.reset_peak_memory_stats()
+    device=resolve_device()
+    if device == 'cuda':
+        # Bound allocator pressure on a laptop sharing its GPU with the desktop.
+        # This is not a remedy for a kernel/driver fault; OOM remains a reported failure.
+        torch.cuda.set_per_process_memory_fraction(0.75)
+        torch.cuda.reset_peak_memory_stats()
+    torch.set_num_threads(6)
     started=time.monotonic(); duration=float(details.get('duration') or config.get('presentation_seconds',8))
     words=list(config.get('transcript') or details.get('transcript') or []); transcript_source='provided timed words' if words else 'none'
     adaptation=None; original_kind=kind
@@ -136,7 +141,7 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
         on_progress('Loading frozen TRIBE and local feature encoders')
         if str(root) not in sys.path: sys.path.insert(0,str(root))
         from models.load_local_tribe import load_local_tribe
-        _model=load_local_tribe('cuda')
+        _model=load_local_tribe(device)
         _model.data.batch_size=1; _model.data.num_workers=0
     on_progress('Predicting cortical responses')
     predictions,segments=_model.predict(events=events,verbose=False)
@@ -146,7 +151,7 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
     times=[float(x.start) for x in segments]
     atomic_json(output/'segments.json',[{'start':float(x.start),'duration':float(x.duration)} for x in segments])
     evidence=summarize(predictions,times)
-    evidence.update({'evaluator':'TRIBE v2','profile':profile_id(),'kind':'model_predicted_cortical_response','segment_durations':[float(x.duration) for x in segments],'source_duration':duration,'modalities':sorted(events.type.unique().tolist()),'transcript_source':transcript_source,'transcript_words':len(words),'input_adaptation':adaptation,'seconds':time.monotonic()-started,'peak_cuda_bytes':torch.cuda.max_memory_allocated(),'time_note':'Official segment timestamps retained. TRIBE handles the hemodynamic offset; no extra time shift is applied.','quantization':'Original TRIBE brain checkpoint; locally quantized INT8 video and NF4 base text encoders.','limitations':['Predicted average cortical response, not an individual brain scan.','Not purchase intent, CTR, thoughts, or a calibrated emotion probability.','Quantized end-to-end neuroscience accuracy has not been established.'],'emotion_decoder':{'status':'blocked','reason':'Kragel surface registration and synthetic-to-measured transfer are not validated.'}})
+    evidence.update({'evaluator':'TRIBE v2','profile':profile_id(),'kind':'model_predicted_cortical_response','device':device,'segment_durations':[float(x.duration) for x in segments],'source_duration':duration,'modalities':sorted(events.type.unique().tolist()),'transcript_source':transcript_source,'transcript_words':len(words),'input_adaptation':adaptation,'seconds':time.monotonic()-started,'peak_cuda_bytes':torch.cuda.max_memory_allocated() if device == 'cuda' else None,'time_note':'Official segment timestamps retained. TRIBE handles the hemodynamic offset; no extra time shift is applied.','quantization':'Original TRIBE brain checkpoint; locally quantized INT8 video and NF4 base text encoders.','limitations':['Predicted average cortical response, not an individual brain scan.','Not purchase intent, CTR, thoughts, or a calibrated emotion probability.','Quantized end-to-end neuroscience accuracy has not been established.'],'emotion_decoder':{'status':'blocked','reason':'Kragel surface registration and synthetic-to-measured transfer are not validated.'}})
     evidence['hardware_preflight']=preflight
     if config.get('include_tsam'):
         if not config.get('tsam_research_acknowledged'):

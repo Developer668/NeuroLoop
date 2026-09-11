@@ -11,6 +11,20 @@ from transformers import VJEPA2Config, VJEPA2Model, AutoVideoProcessor
 
 ROOT = Path(__file__).resolve().parent
 
+
+def resolve_device(device='auto'):
+    if device != 'auto':
+        if device == 'cuda' and not torch.cuda.is_available():
+            raise RuntimeError('CUDA was requested but is unavailable on this machine')
+        if device == 'mps' and (getattr(torch.backends, 'mps', None) is None or not torch.backends.mps.is_available()):
+            raise RuntimeError('Apple MPS was requested but is unavailable on this machine')
+        return device
+    if torch.cuda.is_available():
+        return 'cuda'
+    if getattr(torch.backends, 'mps', None) is not None and torch.backends.mps.is_available():
+        return 'mps'
+    return 'cpu'
+
 class Int8Linear(nn.Module):
     """Keep weights INT8, dequantize one layer at a time for portable CPU/CUDA inference.
 
@@ -29,7 +43,7 @@ class Int8Linear(nn.Module):
 
 def load_video_model(repo_dir=ROOT, device='auto'):
     folder = Path(repo_dir) / 'quantized_video'
-    device = ('cuda' if torch.cuda.is_available() else 'cpu') if device == 'auto' else device
+    device = resolve_device(device)
     metadata = json.loads((folder / 'quantization.json').read_text())
     if metadata['format'] != 'neuroloop-int8-v1':
         raise ValueError('Unsupported quantized format')
@@ -50,7 +64,7 @@ def load_quantized_tribev2(repo_dir=ROOT, device='auto', cache_folder=None):
     from tribev2 import TribeModel
     from neuralset.extractors import video as video_module
     repo_dir = Path(repo_dir).resolve()
-    device = ('cuda' if torch.cuda.is_available() else 'cpu') if device == 'auto' else device
+    device = resolve_device(device)
     cache_folder = str(cache_folder or repo_dir / 'cache-int8')
     # Convert the official Linux YAML tags without executing Python constructors.
     class SourceConfigLoader(yaml.SafeLoader):

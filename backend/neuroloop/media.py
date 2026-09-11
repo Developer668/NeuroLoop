@@ -109,7 +109,7 @@ def compose(source: Path,destination: Path,spec: dict) -> Path:
     width,height=sizes[spec.get('aspect','landscape')]
     duration=int(spec['duration']); start=float(spec['headline_start'])
     if not 0<=start<duration-0.25: raise MediaError('Headline must appear before the creative ends')
-    font_candidates=[Path('C:/Windows/Fonts/georgia.ttf'),Path('/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf')]
+    font_candidates=[Path('C:/Windows/Fonts/georgia.ttf'),Path('/System/Library/Fonts/Supplemental/Georgia.ttf'),Path('/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf')]
     font=next((p for p in font_candidates if p.exists()),None)
     if font is None: raise MediaError('A local render font must be configured')
     # Fixed filenames and cwd avoid FFmpeg filter escaping/injection from input text.

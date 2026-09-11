@@ -1,4 +1,5 @@
 """Explicit configuration; secrets never enter browser bundles or evidence records."""
+import os
 from pathlib import Path
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -8,6 +9,19 @@ ROOT = Path(__file__).resolve().parents[2]
 from dotenv import load_dotenv
 load_dotenv(ROOT / '.env', override=False)
 
+
+def _runtime_python(name: str) -> Path:
+    executable = 'Scripts/python.exe' if os.name == 'nt' else 'bin/python'
+    return ROOT / '.runtimes' / name / executable
+
+
+def _default_model_python() -> Path:
+    staged = _runtime_python('model')
+    if staged.exists() or (ROOT / '.runtimes/active.json').is_file():
+        return staged
+    executable = 'Scripts/python.exe' if os.name == 'nt' else 'bin/python'
+    return ROOT / 'tribev2-balanced-qv-local/.venv' / executable
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix='NEUROLOOP_', env_file=ROOT / '.env', extra='ignore')
     root: Path = ROOT
@@ -15,7 +29,7 @@ class Settings(BaseSettings):
     host: str = '127.0.0.1'
     port: int = 8010
     frontend_origin: str = 'http://localhost:3010'
-    model_python: Path = ROOT / ('.runtimes/model/Scripts/python.exe' if (ROOT/'.runtimes/active.json').is_file() else 'tribev2-balanced-qv-local/.venv/Scripts/python.exe')
+    model_python: Path = _default_model_python()
     model_timeout_seconds: int = 900
     allow_model_downloads: bool = False
     tsam_enabled: bool = False

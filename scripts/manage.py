@@ -26,6 +26,15 @@ STOP = DATA / 'stop-services.request'
 PORTS = {'api': 8010, 'web': 3010, 'research': 2718}
 
 
+def runtime_python(name: str) -> Path:
+    executable = 'Scripts/python.exe' if os.name == 'nt' else 'bin/python'
+    return ROOT / '.runtimes' / name / executable
+
+
+def mac_mps_override_enabled() -> bool:
+    return sys.platform == 'darwin' and os.getenv('NEUROLOOP_ALLOW_MPS_INFERENCE', '').lower() in {'1', 'true', 'yes'}
+
+
 def port_open(port: int) -> bool:
     try:
         with socket.create_connection(('127.0.0.1', port), timeout=0.4):
@@ -66,12 +75,13 @@ def stop_children(children: dict) -> None:
 
 
 def serve(open_browser: bool, model_runtime: str = 'model') -> None:
-    python = ROOT / '.venv/Scripts/python.exe' if os.name == 'nt' else ROOT / '.venv/bin/python'
-    model_python = ROOT / 'tribev2-balanced-qv-local/.venv/Scripts/python.exe'
+    executable = 'Scripts/python.exe' if os.name == 'nt' else 'bin/python'
+    python = ROOT / '.venv' / executable
+    model_python = ROOT / 'tribev2-balanced-qv-local/.venv' / executable
     active = ROOT / '.runtimes/active.json'
-    if active.exists() or os.getenv('NEUROLOOP_STAGED_RUNTIME') == 'true':
-        python=ROOT/'.runtimes/app/Scripts/python.exe'
-        model_python=ROOT/'.runtimes'/model_runtime/'Scripts/python.exe'
+    if active.exists() or os.getenv('NEUROLOOP_STAGED_RUNTIME') == 'true' or runtime_python('app').exists():
+        python = runtime_python('app')
+        model_python = runtime_python(model_runtime)
     node = shutil.which('node')
     next_cli = ROOT / 'frontend/scripts/start-server.mjs'
     if not python.exists() or not model_python.exists() or not node or not next_cli.exists():
@@ -96,11 +106,11 @@ def serve(open_browser: bool, model_runtime: str = 'model') -> None:
         'web': ([node, str(next_cli)], ROOT / 'frontend'),
         'research': ([str(python), '-m', 'marimo', 'run', str(ROOT / 'research/lab.py'), '--host', '127.0.0.1', '--port', '2718', '--no-token'], ROOT),
     }
-    quarantined=(DATA/'inference-quarantine.json').is_file()
+    quarantined=(DATA/'inference-quarantine.json').is_file() and not mac_mps_override_enabled()
     if quarantined:
         commands.pop('worker')
         print('Inference paused after a graphics crash. Starting evidence review, API and research only.',flush=True)
-    if not quarantined and (ROOT/'infrastructure/launch/installed.json').is_file():
+    if not quarantined and not mac_mps_override_enabled() and (ROOT/'infrastructure/launch/installed.json').is_file():
         commands['launch']=([str(python),'-u',str(ROOT/'scripts/launch_agent.py')],ROOT)
     children = {}
     handles = []
@@ -128,7 +138,8 @@ def serve(open_browser: bool, model_runtime: str = 'model') -> None:
         print('Web:      http://localhost:3010', flush=True)
         print('MCP:      http://127.0.0.1:8010/mcp  (authenticated)', flush=True)
         print('Research: http://localhost:2718', flush=True)
-        print('Local single-workspace deployment. Press Ctrl+C or run Stop-NeuroLoop.cmd to stop.', flush=True)
+        stop_name = 'Stop-NeuroLoop.cmd' if os.name == 'nt' else './Stop-NeuroLoop.sh'
+        print(f'Local single-workspace deployment. Press Ctrl+C or run {stop_name} to stop.', flush=True)
         if open_browser:
             webbrowser.open('http://localhost:3010/workspace')
         while not STOP.exists():

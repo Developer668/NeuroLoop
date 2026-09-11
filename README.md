@@ -6,7 +6,7 @@ A local creative research workspace with real TRIBE v2 predictions, controlled m
 
 ## Open the application
 
-Double-click `D:\NeuroLoop\Start-NeuroLoop.cmd`. Choose **Connect to this computer** if prompted. The launcher starts the website, API and local marimo app; while the execution hold exists it omits the model worker and Launch agent.
+On Windows, double-click `D:\NeuroLoop\Start-NeuroLoop.cmd`. On Apple Silicon macOS, run `./Start-NeuroLoop.sh` from the repository folder. Choose **Connect to this computer** if prompted. The launcher starts the website, API and local marimo app. The Mac launcher uses the MPS inference backend for an explicitly requested local stability test and keeps the original Windows crash hold record; the Windows launcher continues to honor that hold and omits the model worker and Launch agent.
 
 | Page | Address |
 |---|---|

@@ -12,6 +12,7 @@ pytest>=8,<10
 pytest-asyncio>=0.25
 python-dotenv>=1,<2
 Pillow>=11
+imageio-ffmpeg>=0.6,<1
 
 # Local telemetry, durable worker lock and numerical evidence
 psutil>=6,<8
