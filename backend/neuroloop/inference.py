@@ -4,7 +4,7 @@ Only the dedicated worker calls this module. The API process never loads a GPU m
 There is no generated Python execution and no model-server shell command.
 """
 from __future__ import annotations
-import gc, hashlib, json, os, sys, time, subprocess
+import gc, hashlib, json, os, shutil, sys, time, subprocess
 import platform
 from pathlib import Path
 from functools import lru_cache
@@ -67,6 +67,15 @@ def _release_model(model, torch, device: str) -> None:
         if callable(empty_cache):
             empty_cache()
 
+
+def _cleanup_evaluation_intermediates(output: Path, payload: Path | None = None) -> None:
+    """Remove evaluator-owned scratch files without touching published evidence."""
+    for name in ('audio-16k.wav', 'presentation.mp4'):
+        (output / name).unlink(missing_ok=True)
+    shutil.rmtree(output / 'tsam', ignore_errors=True)
+    if payload is not None:
+        payload.unlink(missing_ok=True)
+
 def evaluate(path: Path,kind: str,details: dict,config: dict,output: Path,on_progress=lambda stage:None) -> dict:
     """Reclaim all encoder allocations between candidates via an owned child.
 
@@ -100,7 +109,7 @@ def evaluate(path: Path,kind: str,details: dict,config: dict,output: Path,on_pro
         if process is not None and process.poll() is None:
             process.kill();process.wait()
         if process is not None and process.stdout is not None:process.stdout.close()
-        payload.unlink(missing_ok=True)
+        _cleanup_evaluation_intermediates(output, payload)
 
 def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output: Path,on_progress=lambda stage:None) -> dict:
     global _model

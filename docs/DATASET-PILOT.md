@@ -36,21 +36,18 @@ runtime, runs no inference, and never writes to the pack:
 
 ```text
 python3 scripts/verify_pitt_ads_pilot.py \
-  /Users/adityadas/Desktop/Programming/Hackathons/NeuroLoop/data/datasets/pitt-ads-sentiment-50 \
-  --json
+  /Users/adityadas/Desktop/Programming/Hackathons/NeuroLoop/data/datasets/pitt-ads-sentiment-50-unique \
+  --strict-unique --json
 ```
 
-For a CI-style distinct-ad gate, add `--strict-unique`. The normal check keeps
-multi-label source reuse visible as a warning so the existing pack can still be
-inspected without pretending it contains 50 independent source images.
+The canonical pilot uses `--strict-unique` so repeated source IDs or repeated
+image hashes fail the gate.
 
-At audit time, the external pack was 4.7 MB with 50 rows, 50 listed image
-files, five rows per label, and all declared byte counts and SHA-256 digests
-matching. It contains 49 unique source keys and 49 unique hashes: source
-`10/171565.png` appears once under `angry` and once under `sad`, with hash
-`8be37e48b47e93e8ee6816c3fc7d637a5d50d93dc04674b5890dc2e4b9960b96`. The
-verifier reports this as `PASS_WITH_WARNINGS`; `--strict-unique` intentionally
-fails it.
+At integration time, the canonical external pack was 4.5 MB with 50 rows, 50
+listed image files, 50 unique source keys, 50 unique SHA-256 hashes, and five
+rows per label. All declared byte counts and hashes match. The earlier
+`pitt-ads-sentiment-50` folder is preserved as a legacy receipt; it contains one
+cross-label duplicate and intentionally fails the strict gate.
 
 ## Generate a new pack
 
@@ -60,7 +57,7 @@ source key already selected for another label:
 
 ```text
 python3 scripts/download_pitt_ads_pilot.py \
-  --output /path/to/new/pitt-ads-sentiment-50 \
+  --output /path/to/new/pitt-ads-sentiment-50-unique \
   --count 50
 ```
 

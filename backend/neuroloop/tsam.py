@@ -133,12 +133,12 @@ def predict_video(path: Path, duration: float, output: Path) -> dict:
         }
     started = time.monotonic()
     torch.set_num_threads(4)
-    from lib.dataset.video import get_video_x
     work = output / 'tsam'; frames = work / 'frames'
     frames.mkdir(parents=True, exist_ok=True)
     model = args = None
     try:
         model, args = load_model()
+        from lib.dataset.video import get_video_x
         # Preserve upstream 10 FPS JPEG extraction and 256-pixel height.
         execute(['-y', '-i', str(path), '-vf', f'scale=-1:{VIDEO_HEIGHT},fps={VIDEO_FPS}', '-q:v', '0', str(frames / '%06d.jpg')])
         wave = work / 'audio.wav'
@@ -168,7 +168,7 @@ def predict_video(path: Path, duration: float, output: Path) -> dict:
                     raise ValueError('Invalid TSAM output; no substitute result is emitted')
                 windows.append({**window, 'start': start, 'end': start + WINDOW_SECONDS,
                                 'logits': logits.tolist(), 'top_class': LABELS[int(logits.argmax())]})
-                del video, clip, channels, audio, logits
+                del video, clip, channels, mel, audio, logits
         checkpoint = settings().root / 'models/emotion/tsam/weights/tsam_weights.tar'
         checkpoint_hash = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
         axis = normalized_axis(windows, duration, source='tsam')

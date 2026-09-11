@@ -6,6 +6,39 @@ from neuroloop.generation import DeferredProvider, statuses
 from neuroloop import kragel
 
 
+def upload_image(client, headers, name='test.png'):
+    from io import BytesIO
+    from PIL import Image
+
+    payload = BytesIO()
+    Image.new('RGB', (320, 180), (90, 60, 60)).save(payload, format='PNG')
+    response = client.post(
+        '/api/assets', headers=headers,
+        files={'file': (name, payload.getvalue(), 'image/png')},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def create_project(client, headers, asset):
+    response = client.post(
+        '/api/projects', headers=headers,
+        json={'name': 'Response test', 'asset_id': asset['id']},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def allow_test_readouts(monkeypatch):
+    """Expose a model-free readiness fixture for controller-only tests."""
+    from neuroloop import services
+
+    monkeypatch.setattr(services, 'readout_asset_status', lambda root=None: {
+        'tsam': {'ready': True, 'missing': []},
+        'kragel': {'ready': True, 'missing': []},
+    })
+
+
 def test_response_target_requires_target_and_a_response_source():
     with pytest.raises(ValueError, match='requires a target'):
         RunCreate(project_id='p', objective='response_target')
@@ -53,10 +86,10 @@ def test_kragel_status_fails_closed_without_assets(monkeypatch,tmp_path):
     assert value['missing']
 
 
-def test_response_target_run_does_not_require_reference(client,headers):
-    from backend.tests.test_contracts import upload, project
-    asset=upload(client,headers)
-    p=project(client,headers,asset)
+def test_response_target_run_does_not_require_reference(client,headers,monkeypatch):
+    allow_test_readouts(monkeypatch)
+    asset=upload_image(client,headers)
+    p=create_project(client,headers,asset)
     body={'project_id':p['id'],'mode':'optimize','objective':'response_target',
           'target':{'emotions':{'happiness':{'desired':.8}}},'include_kragel':True,
           'allow_static_presentation':True,'max_evaluations':2}
@@ -66,9 +99,8 @@ def test_response_target_run_does_not_require_reference(client,headers):
 
 
 def test_reference_objective_still_requires_reference(client,headers):
-    from backend.tests.test_contracts import upload, project
-    asset=upload(client,headers)
-    p=project(client,headers,asset)
+    asset=upload_image(client,headers)
+    p=create_project(client,headers,asset)
     response=client.post('/api/runs',headers=headers,json={'project_id':p['id'],'mode':'optimize','allow_static_presentation':True})
     assert response.status_code==400
     assert 'reference' in response.json()['detail'].lower()
@@ -82,12 +114,12 @@ def test_worker_cache_contract_includes_response_sources():
 
 def test_response_target_worker_keeps_improving_candidate(client,headers,monkeypatch):
     """Exercise the real controller/ledger with deterministic evaluator outputs, no GPU/network."""
-    from backend.tests.test_contracts import upload, project
     from neuroloop import worker
     from neuroloop.db import Evaluation, Session, Experiment, Run
 
-    asset=upload(client,headers,name='loop.png')
-    p=project(client,headers,asset)
+    allow_test_readouts(monkeypatch)
+    asset=upload_image(client,headers,name='loop.png')
+    p=create_project(client,headers,asset)
     request={
         'project_id':p['id'],'mode':'optimize','objective':'response_target',
         'target':{'goal':'positive response','emotions':{'happiness':{'desired':.8,'weight':1}}},

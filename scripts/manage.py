@@ -61,17 +61,12 @@ def endpoint_ready(url: str) -> bool:
         return False
 
 
-def stop_children(children: dict) -> None:
+def stop_children(children: dict, job: OwnedJob) -> None:
+    """Stop every service-owned process group, including descendants."""
     for process in children.values():
-        if process.poll() is None:
-            process.terminate()
-    deadline = time.monotonic() + 12
-    for process in children.values():
-        try:
-            process.wait(timeout=max(0.1, deadline - time.monotonic()))
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
+        # Even an exited group leader may have live descendants. OwnedJob keeps
+        # the original group id so it can still clean that remaining tree.
+        job.terminate(process, timeout=12)
 
 
 def serve(open_browser: bool, model_runtime: str = 'model') -> None:
@@ -120,7 +115,11 @@ def serve(open_browser: bool, model_runtime: str = 'model') -> None:
         for name, (command, cwd) in commands.items():
             handle = (DATA / 'logs' / f'{name}-service.log').open('ab')
             handles.append(handle)
-            children[name] = subprocess.Popen(command, cwd=cwd, env=env, stdout=handle, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+            children[name] = subprocess.Popen(
+                command, cwd=cwd, env=env, stdout=handle,
+                stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                start_new_session=os.name != 'nt',
+            )
             job.add(children[name])
         manifest = {'instance': instance, 'pid': os.getpid(), 'children': {name: child.pid for name, child in children.items()}, 'started_at': time.time(), 'binding': '127.0.0.1 only'}
         STATE.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
@@ -150,7 +149,7 @@ def serve(open_browser: bool, model_runtime: str = 'model') -> None:
     except KeyboardInterrupt:
         print('Stopping owned services...', flush=True)
     finally:
-        stop_children(children)
+        stop_children(children, job)
         job.close()
         for handle in handles:
             handle.close()
