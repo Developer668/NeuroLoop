@@ -2,6 +2,8 @@
 
 Updated: 2026-09-11 (America/Los_Angeles)
 
+Current orchestration state: **PAUSED BY PARENT TASK HANDOFF**. Native multi-agent orchestration is expected to take over. Do not provision duplicate workstreams from this ledger without first reconciling the two task IDs and worktrees below.
+
 ## Protected baseline
 
 - Source checkout: `/Users/adityadas/Desktop/Programming/Hackathons/NeuroLoop`
@@ -32,8 +34,8 @@ Every workstream uses `gpt-5.6-luna` with maximum reasoning in an isolated Codex
 
 | # | Workstream | Dependencies | Status | Guardian verdict |
 |---|---|---|---|---|
-| 1 | Protected baseline plus real-model/MPS memory/E2E investigation | baseline | DISPATCHING | pending |
-| 2 | Scientific response stack: TRIBE/Kragel/TSAM/ensemble, temporal targets, provenance | baseline | DISPATCHING | pending |
+| 1 | Protected baseline plus real-model/MPS memory/E2E investigation | baseline | PAUSE REQUESTED | not reviewed |
+| 2 | Scientific response stack: TRIBE/Kragel/TSAM/ensemble, temporal targets, provenance | baseline | PAUSE REQUESTED | not reviewed |
 | 3 | CreativeStrategist, typed interventions, A/B/C branching, policy learning | 2 contracts | QUEUED | pending |
 | 4 | CreativeConstraints plus media quality/corruption gates | 2 contracts | QUEUED | pending |
 | 5 | Complete MCP closed-loop contract and external-agent iteration | 2, 3, 4 | QUEUED | pending |
@@ -56,4 +58,9 @@ Every workstream uses `gpt-5.6-luna` with maximum reasoning in an isolated Codex
 
 ## Integration review log
 
-No workstream result has been accepted or merged yet.
+- No workstream result has been accepted or merged.
+- Luna W1 task: `01a08fef-23f5-7121-9f4c-2bb547fa31a5` (client setup ID `client-new-thread:628faad5-2da6-4a62-aea5-b603fb62e2c2`). Its latest report verified the clean protected commit and noted that quarantine/runtime receipts are external to the worktree. A pause message was sent while its turn still reported active.
+- Luna W2 task: `01a08fef-23f5-7121-9f4c-2bd112c9d3b5` (client setup ID `client-new-thread:55378ad2-dfde-46b2-a775-96234a0a9ecc`). Its latest report identified permissive malformed-window handling, unsupported Kragel dimensions represented as zero, no stable temporal axis, and incomplete projection cache identity. A pause message was sent while its turn still reported active.
+- Preserved Codex worktrees: `/Users/adityadas/.codex/worktrees/1ccf/NeuroLoop` and `/Users/adityadas/.codex/worktrees/4f81/NeuroLoop`. At handoff recording time both were clean, detached at `f5e1132c5513319d41a15a40c461b9b73210f60b`, with no feature diff and no new commit.
+- Workstreams 3-10 were deliberately not provisioned because their dependency gates had not passed.
+- The integration branch contains only this orchestration ledger on top of the protected baseline.
