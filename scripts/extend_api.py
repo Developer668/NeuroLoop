@@ -1,0 +1,27 @@
+from pathlib import Path
+import shutil
+ROOT=Path(__file__).resolve().parents[1]
+BACKUP=ROOT/'data/build-backups/api-extension';BACKUP.mkdir(parents=True,exist_ok=True)
+def patch(file,old,new):
+ p=ROOT/file;t=p.read_text(encoding='utf8')
+ if new in t:return
+ if t.count(old)!=1:raise RuntimeError(file+' match failed')
+ out=BACKUP/file;out.parent.mkdir(parents=True,exist_ok=True)
+ if not out.exists():shutil.copy2(p,out)
+ p.write_text(t.replace(old,new),encoding='utf8');print(file)
+patch('backend/neuroloop/schemas.py',"class LoginRequest(StrictModel):", "class TranscriptUpdate(StrictModel):\n    words: list[TimedWord] = Field(min_length=1, max_length=2000)\n\nclass LoginRequest(StrictModel):")
+patch('backend/neuroloop/api.py','ProjectCreate,RunCreate,CreativeCreate,CompareRequest','ProjectCreate,RunCreate,CreativeCreate,CompareRequest,TranscriptUpdate')
+patch('backend/neuroloop/api.py',"@app.get('/api/assets/{identity}')", "@app.put('/api/assets/{identity}/transcript')\ndef update_transcript(identity: str,body: TranscriptUpdate):\n    with Session.begin() as db:\n        item=db.get(Asset,identity)\n        if not item: raise HTTPException(404,'Asset not found')\n        if item.kind not in {'audio','video','text'}: raise HTTPException(422,'Timed words require audio, video, or text')\n        words=[w.model_dump() for w in body.words]\n        if any(words[i]['start']>words[i+1]['start'] for i in range(len(words)-1)):\n            raise HTTPException(422,'Timed words must be in chronological order')\n        duration=item.details.get('duration')\n        if duration and any(w['end']>duration+0.1 for w in words):\n            raise HTTPException(422,'A word extends beyond the source duration')\n        if item.kind=='text':\n            actual=Path(item.path).read_text(encoding='utf8')\n            normalized=lambda value: ' '.join(value.split())\n            if normalized(actual)!=normalized(' '.join(w['text'] for w in words)):\n                raise HTTPException(422,'Timed words must preserve the exact source text')\n        item.details={**item.details,'transcript':words,'transcript_source':'user-supplied timed words'}\n        return as_dict(item,('path',))\n\n@app.get('/api/assets/{identity}')")
+patch('backend/neuroloop/services.py',"words=body.transcript if media_id==original.id else selected.details.get('transcript',[])", "words=(body.transcript or selected.details.get('transcript',[])) if media_id==original.id else selected.details.get('transcript',[])")
+patch('backend/neuroloop/services.py',"if original.kind=='text' and not body.transcript:","if original.kind=='text' and not (body.transcript or original.details.get('transcript')):")
+patch('backend/neuroloop/services.py',"        required=1+len(project.reference_ids)","        if project.constraints.get('locked_copy') and not original.details.get('composition'):\n            raise DomainError('Exact-copy locking requires an editable composition with a known text layer')\n        if not isinstance(project.constraints.get('max_filter_edits',2),int) or not 0<=project.constraints.get('max_filter_edits',2)<=4:\n            raise DomainError('max_filter_edits must be an integer between 0 and 4')\n        for field in ['preserve_duration','preserve_audio']:\n            if field in project.constraints and not isinstance(project.constraints[field],bool):\n                raise DomainError(field+' must be boolean')\n        required=1+len(project.reference_ids)")
+# Transcript updates change the evaluation cache key, not the immutable source bytes.
+patch('backend/neuroloop/worker.py',"meaningful={k:config.get(k) for k in ['no_speech','transcript','allow_static_presentation','presentation_seconds']}","meaningful={k:config.get(k) for k in ['no_speech','transcript','allow_static_presentation','presentation_seconds']}\n    meaningful['transcript']=config.get('transcript') or asset.details.get('transcript',[])\n    meaningful['metric_schema']=METRIC")
+patch('backend/neuroloop/services.py',"'status':'configured' if bool(os.getenv('WANDB_API_KEY')) else 'not_configured'", "'status':'configured' if s.weave_enabled and bool(os.getenv('WANDB_API_KEY')) else 'not_configured'")
+patch('backend/neuroloop/services.py',"{'name':'marimo','status':'available','purpose':'Read-only research application over recorded evidence'}", "{'name':'marimo','status':'installed' if (root/'research/lab.py').is_file() else 'not_configured','purpose':'Read-only research application over recorded evidence; start the research service separately'}")
+patch('backend/neuroloop/integrations.py',"if not os.getenv('WANDB_API_KEY'): return False", "if not settings().weave_enabled or not os.getenv('WANDB_API_KEY'): return False")
+patch('backend/neuroloop/integrations.py',"if not os.getenv('WANDB_API_KEY'): return\n", "if not settings().weave_enabled or not os.getenv('WANDB_API_KEY'): return\n")
+patch('frontend/components/BrainCanvas.tsx',"if(!evaluationId){setTime(null);return;}","if(!evaluationId){setTime(null);return;}") if False else None
+patch('frontend/components/BrainCanvas.tsx',"view.current.render();setTime(data.time);", "view.current.render();setTime(data.time);setStatus('');")
+patch('frontend/components/BrainCanvas.tsx',"onClick={()=>container.current?.parentElement?.requestFullscreen?.()}","onClick={()=>{const result=container.current?.parentElement?.requestFullscreen?.();result?.catch(()=>setStatus('Fullscreen is unavailable in this browser'));}}")
+print('API extensions applied with backups.')

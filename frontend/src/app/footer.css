@@ -1,0 +1,187 @@
+.motion-footer {
+  padding-top: 100px;
+  background: #102f3b;
+}
+.footer-opening {
+  position: relative;
+  z-index: 2;
+}
+.footer-opening h2 {
+  font-size: clamp(60px, 8vw, 125px);
+  margin-bottom: 55px;
+}
+.footer-opening .eyebrow {
+  font-size: 10px;
+  color: #9dc1bf;
+  letter-spacing: 0.14em;
+}
+.footer-magnetic {
+  width: 166px;
+  height: 166px;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 14px;
+  padding: 32px;
+  border-color: #91bdbb70;
+  font-size: 13px;
+  line-height: 1.5;
+  background: #c2e4d906;
+}
+.footer-magnetic:hover {
+  transform: none;
+  background: #c2e4d915;
+}
+.footer-curtain {
+  position: absolute;
+  inset: 0;
+  background: #f7f8f4;
+  z-index: 5;
+  pointer-events: none;
+  transform-origin: top;
+  border-radius: 0 0 50% 50%;
+}
+.footer-marquee {
+  margin: 12px -6vw 60px;
+  border-top: 1px solid #c4dfd725;
+  border-bottom: 1px solid #c4dfd725;
+  overflow: hidden;
+  padding: 19px 0;
+  mask-image: linear-gradient(
+    90deg,
+    transparent,
+    #000 12%,
+    #000 88%,
+    transparent
+  );
+}
+.footer-marquee > div {
+  display: flex;
+  width: max-content;
+  animation: footer-ticker 44s linear infinite;
+  animation-play-state: paused;
+}
+.motion-footer[data-visible="true"] .footer-marquee > div {
+  animation-play-state: running;
+}
+.footer-marquee span {
+  white-space: nowrap;
+  font-size: clamp(18px, 2.2vw, 34px);
+  font-weight: 350;
+  letter-spacing: 0.025em;
+  color: #b7d4cc;
+}
+.footer-marquee i {
+  display: inline-block;
+  margin: 0 30px;
+  font-style: normal;
+  color: #538e8d;
+}
+.footer-wordmark {
+  background: linear-gradient(180deg, #e9f0e6, #83aead);
+  color: transparent;
+  background-clip: text;
+}
+.footer-wordmark-window {
+  margin-top: 70px;
+}
+.footer-links {
+  position: relative;
+  z-index: 2;
+}
+.footer-links > p {
+  font-size: 17px;
+  line-height: 1.65;
+  letter-spacing: -0.02em;
+}
+.footer-links nav {
+  font-size: 13px;
+}
+.pixel-loading-label {
+  background: linear-gradient(110deg, #456c75 25%, #a2bdba 46%, #315965 65%);
+  background-size: 250% 100%;
+  background-clip: text;
+  color: transparent;
+  animation: pixel-shimmer 2.3s linear infinite;
+}
+.pixel-grid {
+  gap: 1.5px;
+}
+.pixel-grid i {
+  width: 4px;
+  height: 4px;
+}
+.footer-magnetic:focus-visible {
+  outline: 2px solid #bbe3d6;
+  outline-offset: 7px;
+}
+@keyframes footer-ticker {
+  to {
+    transform: translateX(-25%);
+  }
+}
+@keyframes pixel-shimmer {
+  to {
+    background-position: -250% 0;
+  }
+}
+@media (max-width: 700px) {
+  .motion-footer {
+    padding-top: 60px;
+  }
+  .footer-opening {
+    display: flex;
+    align-items: flex-end;
+    gap: 14px;
+  }
+  .footer-opening h2 {
+    font-size: clamp(44px, 9vw, 70px);
+    margin: 22px 0 34px;
+  }
+  .footer-magnetic {
+    height: 110px;
+    width: 110px;
+    padding: 22px;
+    gap: 6px;
+    font-size: 10px;
+    margin-bottom: 34px;
+  }
+  .footer-magnetic svg {
+    width: 26px;
+    height: 26px;
+  }
+  .footer-opening .eyebrow {
+    font-size: 8px;
+  }
+  .footer-marquee {
+    margin-bottom: 36px;
+  }
+  .footer-links > p {
+    font-size: 15px;
+  }
+  .footer-wordmark-window {
+    margin-top: 40px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .footer-marquee > div,
+  .pixel-loading-label {
+    animation: none;
+  }
+  .pixel-loading-label {
+    color: #456c75;
+    background: none;
+  }
+  .footer-curtain {
+    display: none;
+  }
+}
+[data-motion="reduced"] .footer-marquee > div,
+[data-motion="reduced"] .pixel-loading-label {
+  animation: none;
+}
+[data-motion="reduced"] .footer-curtain {
+  display: none;
+}

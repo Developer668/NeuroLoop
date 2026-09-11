@@ -1,0 +1,82 @@
+[project]
+name = "wandb_mcp_server"
+version = "0.3.7"
+requires-python = ">=3.11"
+dependencies = [
+    "weave>=0.52.35",
+    "wandb[workspaces]>=0.28.0",
+    "httpx>=0.28.1",
+    "mcp[cli]>=1.0.0",
+    "simple-parsing>=0.1.7",
+    "python-dotenv>=1.0.0",
+    "tiktoken>=0.9.0",
+    "wandb-workspaces>=0.4.4",
+    "requests>=2.31.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+wandb_mcp_server = "wandb_mcp_server.server:cli"
+add_to_client = "wandb_mcp_server.add_to_client:add_to_client_cli"
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.3.1",
+    "pytest-mock>=3.14.0",
+    "litellm>=1.67.2,<=1.82.6",
+    "anthropic>=0.50.0",
+    "pytest-xdist>=3.6.1",
+    "pytest-asyncio>=0.26.0",
+    "fastapi>=0.104.0",
+]
+http = [
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wandb_mcp_server"]
+
+[tool.pytest.ini_options]
+log_cli = true
+log_cli_level = "INFO"  # or "DEBUG"
+log_cli_format = "%(levelname)s %(message)s"
+log_cli_date_format = "%H:%M:%S"
+markers = [
+    "integration: marks tests that require live external services",
+]
+filterwarnings = [
+    # Ignore Sentry Hub deprecation from weave
+    'ignore:::weave\.trace\.trace_sentry',
+    # Ignore Pydantic Field 'include' deprecations
+    'ignore:Using extra keyword arguments on \`Field\`:pydantic.warnings.PydanticDeprecatedSince20',
+    'ignore:\`include\` is deprecated and does nothing:pydantic.warnings.PydanticDeprecatedSince20',
+    # Ignore Pydantic V1 validator deprecations from wandb_workspaces
+    'ignore:Pydantic V1 style .* validators are deprecated:pydantic.warnings.PydanticDeprecatedSince20:wandb_workspaces\.reports\.v2',
+    # Ignore Weave DeprecationWarning
+    'ignore:deprecated:DeprecationWarning:weave\.trace_server\.trace_server_interface',
+    # Ignore Pydantic __fields__ / __fields_set__ deprecations from weave
+    'ignore:The \`__fields__\` attribute is deprecated:pydantic.warnings.PydanticDeprecatedSince20:weave\.trace\.object_record',
+    'ignore:The \`__fields_set__\` attribute is deprecated:pydantic.warnings.PydanticDeprecatedSince20:weave\.trace\.object_record',
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11.12",
+    "pre-commit>=4.0.0",
+]

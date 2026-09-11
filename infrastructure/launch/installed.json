@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "entity": "jerry-wen0616-santa-clara-university",
+  "project": "neuroloop",
+  "queue": "neuroloop-local-v1",
+  "job": "jerry-wen0616-santa-clara-university/neuroloop/neuroloop-bounded-v1:v0",
+  "artifact_digest": "7664de3c7c2273f133fc08788a5ed055",
+  "resource": "local-process",
+  "sdk": "wandb==0.30.0"
+}

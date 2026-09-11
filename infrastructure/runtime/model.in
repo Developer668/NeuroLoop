@@ -1,0 +1,12 @@
+-r model-app.in
+./infrastructure/vendor/tribev2
+transformers==5.13.0
+bitsandbytes==0.50.2
+accelerate==1.13.0
+faster-whisper==1.2.1
+opencv-python-headless
+scipy
+
+./infrastructure/vendor/moviepy
+setuptools==81.0.0
+./infrastructure/wheels/en_core_web_lg-3.8.0-py3-none-any.whl
