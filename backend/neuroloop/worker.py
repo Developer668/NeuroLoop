@@ -16,6 +16,7 @@ from .integrations import planner_proposal,record_evidence
 from .media_quality import pre_evaluation_gate
 from .strategy import CreativeStrategist,InterventionProposal,operator_implementation
 from .telemetry import traced
+from .persistence import ArtifactIntegrityError, ARTIFACT_FILES, ARTIFACT_MANIFEST_NAME, publish_artifact_manifest, validate_artifact_manifest
 
 log=logging.getLogger(__name__)
 
@@ -44,29 +45,77 @@ def stage(identity: str,message: str) -> None:
 @traced('neuroloop.evaluate')
 def evaluation(identity: str,asset: Asset,config: dict) -> Evaluation:
     run=checkpoint(identity)
-    profile=inference.profile_id()
+    profile_snapshot=inference.profile_snapshot()
+    profile=inference.profile_id(profile_snapshot)
     meaningful={k:config.get(k) for k in ['no_speech','transcript','allow_static_presentation','presentation_seconds','include_tsam','include_kragel']}
     meaningful['transcript']=config.get('transcript') or asset.details.get('transcript',[])
     meaningful['metric_schema']=METRIC
     key=hashlib.sha256(json.dumps({'asset':asset.sha256,'profile':profile,'preprocessing':meaningful},sort_keys=True).encode()).hexdigest()
+    output=settings().data/'results'/key
+
+    def validated_evidence() -> dict | None:
+        manifest_path=output/ARTIFACT_MANIFEST_NAME
+        complete=all((output/name).is_file() for name in ARTIFACT_FILES)
+        if manifest_path.is_file():
+            validate_artifact_manifest(output,cache_key=key,profile=profile,asset_sha256=asset.sha256,profile_manifest=profile_snapshot['manifest'])
+        elif not complete:
+            return None
+        evidence_path=output/'evidence.json'
+        try:
+            evidence=json.loads(evidence_path.read_text(encoding='utf8'))
+            if evidence.get('profile')!=profile:
+                raise ArtifactIntegrityError('Evaluation evidence profile does not match the requested identity')
+            mapped=np.load(output/'prediction.npy',allow_pickle=False,mmap_mode='r')
+            try:
+                shape=list(mapped.shape)
+                from .readout import validate_response
+                validate_response(mapped)
+            finally:
+                if isinstance(mapped,np.memmap) and getattr(mapped,'_mmap',None) is not None:
+                    mapped._mmap.close()
+            if evidence.get('shape')!=shape:
+                raise ArtifactIntegrityError('Evaluation evidence shape does not match prediction.npy')
+            segments=json.loads((output/'segments.json').read_text(encoding='utf8'))
+            if not isinstance(segments,list) or len(segments)!=shape[0]:
+                raise ArtifactIntegrityError('Evaluation segments do not match prediction.npy')
+            starts=[float(item['start']) for item in segments]
+            durations=[float(item['duration']) for item in segments]
+            if evidence.get('times')!=starts or evidence.get('segment_durations')!=durations:
+                raise ArtifactIntegrityError('Evaluation timeline does not match segments.json')
+        except ArtifactIntegrityError:
+            raise
+        except (OSError,UnicodeError,ValueError,KeyError,TypeError) as exc:
+            raise ArtifactIntegrityError('Evaluation artifact contents are invalid') from exc
+        if not manifest_path.is_file():
+            publish_artifact_manifest(output,cache_key=key,profile=profile,asset_sha256=asset.sha256,profile_manifest=profile_snapshot['manifest'])
+        validate_artifact_manifest(output,cache_key=key,profile=profile,asset_sha256=asset.sha256,profile_manifest=profile_snapshot['manifest'])
+        return evidence
+
     with Session() as db:
         cached=db.scalar(select(Evaluation).where(Evaluation.cache_key==key))
-        if cached and cached.prediction_path and Path(cached.prediction_path).is_file():
+        if cached:
+            if cached.profile!=profile or Path(cached.prediction_path or '').resolve()!= (output/'prediction.npy').resolve():
+                raise ArtifactIntegrityError('Cached evaluation database identity does not match its requested artifact')
+            evidence=validated_evidence()
+            if evidence is None or cached.evidence!=evidence:
+                raise ArtifactIntegrityError('Cached evaluation evidence is not hash-linked to its artifact bundle')
             emit(identity,'cache_hit','Reused a version-matched neural evaluation.',asset_id=asset.id,evaluation_id=cached.id)
             return cached
-    output=settings().data/'results'/key
     # A completed result file is a crash-safe checkpoint even if database commit was interrupted.
-    existing=output/'evidence.json'
-    if existing.is_file() and (output/'prediction.npy').is_file():
-        evidence=json.loads(existing.read_text(encoding='utf8'))
-        if evidence.get('profile')!=profile: raise RuntimeError('Checkpoint profile mismatch')
-    else:
+    evidence=validated_evidence()
+    if evidence is None:
+        inference_config={**config,'_expected_profile':profile,'_profile_snapshot':profile_snapshot,'_artifact_context':{'cache_key':key,'asset_sha256':asset.sha256}}
         with Session.begin() as db:
             current=db.get(Run,identity)
             if current.evaluations_used>=current.max_evaluations: raise StopRun('Evaluation budget exhausted')
             current.evaluations_used+=1
         emit(identity,'evaluation_reserved','Reserved one neural evaluation before GPU execution.',asset_id=asset.id)
-        evidence=inference.evaluate(Path(asset.path),asset.kind,asset.details,config,output,lambda msg:stage(identity,msg))
+        inference.evaluate(Path(asset.path),asset.kind,asset.details,inference_config,output,lambda msg:stage(identity,msg))
+        evidence=validated_evidence()
+        if evidence is None:
+            raise ArtifactIntegrityError('Evaluation completed without a finalized artifact manifest')
+    else:
+        emit(identity,'checkpoint_hit','Reused a finalized evaluation checkpoint.',asset_id=asset.id)
     item=Evaluation(asset_id=asset.id,cache_key=key,evaluator='TRIBE v2',profile=profile,evidence=evidence,prediction_path=str(output/'prediction.npy'),duration_seconds=evidence['seconds'])
     with Session.begin() as db:
         prior=db.scalar(select(Evaluation).where(Evaluation.cache_key==key))
@@ -83,7 +132,14 @@ def get_asset(identity: str) -> Asset:
         return item
 
 def load_prediction(item: Evaluation) -> np.ndarray:
-    return np.load(item.prediction_path,allow_pickle=False,mmap_mode='r')
+    """Materialize a validated result before scoring keeps it in memory."""
+    mapped=np.load(item.prediction_path,allow_pickle=False,mmap_mode='r')
+    try:
+        return np.array(mapped,copy=True,subok=False,order='C')
+    finally:
+        mmap_handle=getattr(mapped,'_mmap',None)
+        if mmap_handle is not None:
+            mmap_handle.close()
 
 def render_candidate(run_id: str,original: Asset,best: Asset,best_eval: Evaluation,operator: str | InterventionProposal,experiment_id: str) -> Asset:
     if isinstance(operator,InterventionProposal):
@@ -435,6 +491,12 @@ def heartbeat(identity: str,done: threading.Event) -> None:
             if row and row.status=='running': row.heartbeat=now()
 
 def process(identity: str) -> None:
+    from .execution_guard import require_execution_enabled
+    try:
+        require_execution_enabled()
+    except RuntimeError as exc:
+        finish_interrupted(identity,str(exc))
+        return
     done=threading.Event();thread=threading.Thread(target=heartbeat,args=(identity,done),daemon=True);thread.start()
     status='completed';reason='Completed';error=None
     try:
@@ -447,7 +509,7 @@ def process(identity: str) -> None:
     finally:
         done.set();thread.join(timeout=6)
         with Session.begin() as db:
-            run=db.get(Run,identity);run.status=status;run.stage=reason;run.stop_reason=reason;run.error=error;run.finished_at=now();run.heartbeat=now()
+            run=db.get(Run,identity);run.status=status;run.stage=reason;run.stop_reason=reason;run.error=error;run.owner=None;run.finished_at=now();run.heartbeat=now()
         emit(identity,status,reason,error=error)
 
 def finish_interrupted(identity: str, reason: str, cancelled: bool = False) -> None:
@@ -496,7 +558,7 @@ def supervise_run(identity: str) -> None:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts'))
     from windows_job import OwnedJob
     job = OwnedJob()
-    child = subprocess.Popen(command, stdin=subprocess.DEVNULL)
+    child = subprocess.Popen(command, stdin=subprocess.DEVNULL, start_new_session=os.name != 'nt')
     started = time.monotonic()
     last_telemetry = 0.0
     try:
@@ -513,12 +575,7 @@ def supervise_run(identity: str) -> None:
                 row = db.get(Run, identity)
                 cancelled = not row or bool(row.cancel_requested)
             if pressure or cancelled or time.monotonic() - started > timeout:
-                job.close()
-                child.terminate()
-                try:
-                    child.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    child.kill(); child.wait(timeout=5)
+                job.terminate(child)
                 finish_interrupted(identity,
                     pressure or ('Cancelled; completed evidence preserved' if cancelled else 'Run time limit reached; completed evidence preserved'),
                     cancelled=cancelled)
@@ -526,13 +583,8 @@ def supervise_run(identity: str) -> None:
             time.sleep(0.5)
         finish_interrupted(identity, f'Run process exited before completion (exit {child.returncode}); completed evidence preserved')
     finally:
+        job.terminate(child)
         job.close()
-        if child.poll() is None:
-            child.terminate()
-            try:
-                child.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                child.kill(); child.wait(timeout=5)
 
 
 def main() -> None:

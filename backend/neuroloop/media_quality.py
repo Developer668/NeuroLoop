@@ -134,16 +134,16 @@ def _binary(name: str) -> str | None:
     configured = os.getenv("NEUROLOOP_" + name.upper())
     if configured and Path(configured).is_file():
         return configured
+    if name == "ffmpeg":
+        try:
+            from .media import ffmpeg
+
+            return ffmpeg()
+        except (ImportError, OSError, ValueError):
+            return None
     found = shutil.which(name)
     if found:
         return found
-    if name == "ffmpeg":
-        try:
-            import imageio_ffmpeg
-
-            return imageio_ffmpeg.get_ffmpeg_exe()
-        except ImportError:
-            return None
     return None
 
 

@@ -3,7 +3,7 @@ import json,sys,traceback
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'backend'))
-from neuroloop.inference import _evaluate_in_process
+from neuroloop.execution_guard import require_execution_enabled
 from neuroloop.persistence import atomic_json
 
 if __name__=='__main__':
@@ -16,6 +16,8 @@ if __name__=='__main__':
         raise ValueError('Evaluation output is outside managed results')
     def progress(stage):print('NEUROLOOP_STAGE:'+json.dumps(stage),flush=True)
     try:
+        require_execution_enabled()
+        from neuroloop.inference import _evaluate_in_process
         _evaluate_in_process(Path(arguments['path']),arguments['kind'],arguments['details'],arguments['config'],output,progress)
     except Exception as exc:
         atomic_json(output/'process-error.json',{'error':type(exc).__name__+': '+str(exc)[:1200]})

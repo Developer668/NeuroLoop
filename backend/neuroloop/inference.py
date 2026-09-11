@@ -4,40 +4,225 @@ Only the dedicated worker calls this module. The API process never loads a GPU m
 There is no generated Python execution and no model-server shell command.
 """
 from __future__ import annotations
-import gc, hashlib, json, os, sys, time, subprocess
+import copy, gc, hashlib, json, os, sys, time, subprocess
 import platform
 from pathlib import Path
-from functools import lru_cache
-from .persistence import atomic_json, atomic_numpy
+from .persistence import atomic_json, atomic_numpy, publish_artifact_manifest, ARTIFACT_MANIFEST_NAME
 from .config import settings
 from .media import execute, static_presentation
 from .readout import summarize, validate_response
 
 _model=None
+_model_profile=None
+
+PROFILE_VERSION = 'inference-profile/v2'
+_PROFILE_DIRECTORIES = (
+    'data/geometry',
+    'models/audio/w2v-bert-2.0',
+    'models/brain_readouts/kragel2015/source',
+    'models/emotion/tsam',
+    'models/preprocessing/faster-whisper-small',
+    'models/text/llama-3.2-3b-unsloth-q4',
+    'models/vision/dinov2-large',
+    'tribev2-balanced-qv-local/quantized_video',
+    'infrastructure/vendor/tribev2',
+    'infrastructure/vendor/moviepy',
+)
+_PROFILE_FILES = (
+    'models/load_local_tribe.py',
+    'tribev2-balanced-qv-local/load_quantized_tribev2.py',
+    'tribev2-balanced-qv-local/config.yaml',
+    'tribev2-balanced-qv-local/best.ckpt',
+    'scripts/evaluation_entry.py',
+    'infrastructure/runtime/model.lock',
+    'infrastructure/runtime/model-macos.lock',
+    'backend/neuroloop/inference.py',
+    'backend/neuroloop/tsam.py',
+    'backend/neuroloop/kragel.py',
+    'backend/neuroloop/response.py',
+    'backend/neuroloop/readout.py',
+    'backend/neuroloop/schemas.py',
+    'backend/neuroloop/media.py',
+    'backend/neuroloop/checkpoints.py',
+    'backend/neuroloop/config.py',
+    'backend/neuroloop/device.py',
+    'backend/neuroloop/hardware.py',
+)
+_PROFILE_IGNORED_PARTS = {'.cache', '__pycache__'}
+_PROFILE_IGNORED_NAMES = {'.DS_Store'}
+_profile_digest_cache = {}
+_profile_snapshot_cache = None
 
 
 def _digest(path: Path) -> str | None:
     if not path.is_file():
         return None
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    with path.open('rb') as stream:
+        for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
 
-@lru_cache(maxsize=1)
-def profile_id() -> str:
-    root=settings().root
-    files=[root/'models/load_local_tribe.py',root/'tribev2-balanced-qv-local/load_quantized_tribev2.py',root/'tribev2-balanced-qv-local/config.yaml',root/'tribev2-balanced-qv-local/quantized_video/quantization.json',root/'tribev2-balanced-qv-local/best.ckpt',Path(__file__),root/'backend/neuroloop/tsam.py',root/'backend/neuroloop/kragel.py',root/'backend/neuroloop/response.py',root/'backend/neuroloop/schemas.py']
-    files += sorted((root/'data/geometry').glob('*.gii.gz'))
-    files += sorted((root/'models/brain_readouts/kragel2015/source').glob('*.hdr'))
-    files += sorted((root/'models/brain_readouts/kragel2015/source').glob('*.img'))
-    h=hashlib.sha256()
-    for p in files:
-        if p.exists(): h.update(p.read_bytes())
+def _stat_record(path: Path) -> dict:
+    stat = path.stat()
+    return {
+        'device': int(stat.st_dev),
+        'inode': int(stat.st_ino),
+        'size': int(stat.st_size),
+        'mtime_ns': int(stat.st_mtime_ns),
+        'ctime_ns': int(stat.st_ctime_ns),
+        'mode': int(stat.st_mode),
+    }
+
+
+def _collect_profile_inputs(root: Path) -> tuple[dict[str, Path], dict[str, dict]]:
+    """Discover evaluator files without reading their contents."""
+    candidates = {}
+    layout = {}
+    for relative in (*_PROFILE_FILES, *_PROFILE_DIRECTORIES):
+        path = root / relative
+        if path.is_file():
+            candidates[relative] = path
+            layout[relative] = {'kind': 'file', 'files': [relative]}
+            continue
+        if not path.is_dir():
+            layout[relative] = {'kind': 'missing', 'files': []}
+            continue
+        names = []
+        for child in sorted(path.rglob('*'), key=lambda item: item.as_posix()):
+            if not child.is_file() or child.name in _PROFILE_IGNORED_NAMES:
+                continue
+            if any(part in _PROFILE_IGNORED_PARTS for part in child.relative_to(path).parts):
+                continue
+            name = child.relative_to(root).as_posix()
+            candidates[name] = child
+            names.append(name)
+        layout[relative] = {'kind': 'directory', 'files': names}
+    return candidates, layout
+
+
+def _package_versions() -> dict[str, str]:
     import importlib.metadata
-    for package in ['torch','torchvision','transformers','numpy','pandas','pillow','moviepy','neuralset','neuraltrain','bitsandbytes','accelerate','faster-whisper','spacy','en-core-web-lg']:
-        try: version=importlib.metadata.version(package)
-        except importlib.metadata.PackageNotFoundError: version='missing'
-        h.update((package+'=='+version).encode())
-    h.update(('platform='+platform.system()+'-'+platform.machine()).encode())
-    return 'tribe-local-int8-nf4-'+h.hexdigest()[:16]
+    packages = {}
+    for package in ['torch', 'torchvision', 'transformers', 'numpy', 'pandas', 'pillow', 'moviepy', 'neuralset', 'neuraltrain', 'bitsandbytes', 'accelerate', 'faster-whisper', 'spacy', 'en-core-web-lg']:
+        try:
+            packages[package] = importlib.metadata.version(package)
+        except importlib.metadata.PackageNotFoundError:
+            packages[package] = 'missing'
+    return packages
+
+
+def _runtime_platform() -> dict[str, str]:
+    return {
+        'system': platform.system(),
+        'machine': platform.machine(),
+        'python': platform.python_version(),
+        'implementation': platform.python_implementation(),
+    }
+
+
+def _build_profile_snapshot(root: Path) -> dict:
+    candidates, layout = _collect_profile_inputs(root)
+    stats = {}
+    digests = {}
+    for relative, path in candidates.items():
+        record = _stat_record(path)
+        cache_key = str(path)
+        cached = _profile_digest_cache.get(cache_key)
+        if cached and cached[0] == record:
+            digest = cached[1]
+        else:
+            digest = _digest(path)
+            if digest is None:
+                raise RuntimeError(f'Evaluator input changed while being profiled: {relative}')
+            if _stat_record(path) != record:
+                raise RuntimeError(f'Evaluator input changed while being profiled: {relative}')
+            _profile_digest_cache[cache_key] = (record, digest)
+        stats[relative] = record
+        digests[relative] = digest
+
+    files = {}
+    for relative in (*_PROFILE_FILES, *_PROFILE_DIRECTORIES):
+        entry = layout[relative]
+        files[relative] = None if entry['kind'] == 'missing' else {
+            name: digests[name] for name in entry['files'] if name in digests
+        }
+    manifest = {
+        'version': PROFILE_VERSION,
+        'files': files,
+        'packages': _package_versions(),
+        'platform': _runtime_platform(),
+    }
+    return {
+        'root': str(root),
+        'layout': layout,
+        'stats': stats,
+        'manifest': manifest,
+    }
+
+
+def _snapshot_matches(snapshot: dict, root: Path) -> bool:
+    if not isinstance(snapshot, dict) or snapshot.get('root') != str(root):
+        return False
+    candidates, layout = _collect_profile_inputs(root)
+    if snapshot.get('layout') != layout:
+        return False
+    stats = snapshot.get('stats')
+    if not isinstance(stats, dict) or set(stats) != set(candidates):
+        return False
+    try:
+        if any(_stat_record(path) != stats[relative] for relative, path in candidates.items()):
+            return False
+    except OSError:
+        return False
+    manifest = snapshot.get('manifest')
+    return isinstance(manifest, dict) and manifest.get('packages') == _package_versions() and manifest.get('platform') == _runtime_platform()
+
+
+def profile_snapshot(previous: dict | None = None) -> dict:
+    """Return a stat-validated content hash snapshot.
+
+    Large files are streamed once per process and reused only while their file
+    identity, size, timestamps, mode, directory layout, and runtime versions
+    remain unchanged. A replacement or mutation invalidates the old digest.
+    """
+    global _profile_snapshot_cache
+    root = settings().root.resolve()
+    for candidate in (previous, _profile_snapshot_cache):
+        if candidate is not None and _snapshot_matches(candidate, root):
+            _profile_snapshot_cache = copy.deepcopy(candidate)
+            return copy.deepcopy(_profile_snapshot_cache)
+    snapshot = _build_profile_snapshot(root)
+    _profile_snapshot_cache = snapshot
+    return copy.deepcopy(snapshot)
+
+
+def profile_manifest() -> dict:
+    """Return the immutable inputs and runtime versions behind one evaluator."""
+    return profile_snapshot()['manifest']
+
+
+def profile_id(manifest: dict | None = None) -> str:
+    """Return a content-addressed evaluator identity.
+
+    The snapshot is stat-validated and its file digests are reused while the
+    evaluator inputs remain unchanged, so large weights are not re-read for
+    every cache lookup.
+    """
+    if manifest is None:
+        manifest = profile_manifest()
+    elif 'manifest' in manifest and 'stats' in manifest:
+        manifest = profile_snapshot(manifest)['manifest']
+    encoded = json.dumps(manifest, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
+    return 'tribe-local-int8-nf4-' + hashlib.sha256(encoded).hexdigest()[:16]
+
+
+def _profile_hash(snapshot: dict, relative: str) -> str | None:
+    manifest = snapshot.get('manifest', snapshot)
+    for value in manifest.get('files', {}).values():
+        if isinstance(value, dict) and relative in value:
+            return value[relative]
+    return None
 
 def _transcribe(path: Path) -> list[dict]:
     from faster_whisper import WhisperModel
@@ -66,7 +251,11 @@ def evaluate(path: Path,kind: str,details: dict,config: dict,output: Path,on_pro
         raise ValueError('Input is not a managed media asset')
     if not output.is_relative_to(root/'data'):
         raise ValueError('Invalid result directory')
+    from .execution_guard import require_execution_enabled
+    require_execution_enabled()
     output.mkdir(parents=True,exist_ok=True)
+    if (output / ARTIFACT_MANIFEST_NAME).is_file():
+        raise RuntimeError('Finalized evaluation artifacts are immutable; reuse the validated cache entry')
     payload=output/'evaluation-request.json'
     atomic_json(payload,{'path':str(path),'kind':kind,'details':details,'config':config,'output':str(output)})
     process=None
@@ -91,9 +280,9 @@ def evaluate(path: Path,kind: str,details: dict,config: dict,output: Path,on_pro
         payload.unlink(missing_ok=True)
 
 def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output: Path,on_progress=lambda stage:None) -> dict:
-    global _model
-    from .hardware import require_inference_headroom
-    preflight=require_inference_headroom()
+    global _model, _model_profile
+    from .execution_guard import require_execution_enabled
+    require_execution_enabled()
     import numpy as np
     import pandas as pd
     import torch
@@ -104,6 +293,22 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
     if not path.is_relative_to(root/'data') or not path.is_file(): raise ValueError('Input is not a managed media asset')
     if not output.resolve().is_relative_to(root/'data'): raise ValueError('Invalid result directory')
     output.mkdir(parents=True,exist_ok=True)
+    if (output / ARTIFACT_MANIFEST_NAME).is_file():
+        raise RuntimeError('Finalized evaluation artifacts are immutable; reuse the validated cache entry')
+    finalized_snapshot = profile_snapshot(config.get('_profile_snapshot'))
+    finalized_profile = profile_id(finalized_snapshot)
+    expected_profile = config.get('_expected_profile')
+    if expected_profile and expected_profile != finalized_profile:
+        raise RuntimeError('Evaluator profile changed before model residency; refusing mixed-profile evaluation')
+    checkpoint_hash = _profile_hash(finalized_snapshot, 'tribev2-balanced-qv-local/best.ckpt')
+    geometry_files = sorted((root/'data/geometry').glob('*.gii.gz'))
+    geometry_manifest = {
+        item.name: _profile_hash(finalized_snapshot, 'data/geometry/' + item.name)
+        for item in geometry_files
+    }
+    geometry_hash = hashlib.sha256(json.dumps(geometry_manifest, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    from .hardware import require_inference_headroom
+    preflight=require_inference_headroom()
     os.environ['HF_HUB_OFFLINE']='1'; os.environ['TRANSFORMERS_OFFLINE']='1'; os.environ['TOKENIZERS_PARALLELISM']='false'
     device=resolve_device()
     if device == 'cuda':
@@ -146,11 +351,20 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
         on_progress('Preparing timed language events locally')
         for transform in [AddText(),AddSentenceToWords(max_unmatched_ratio=0.05),AddContextToWords(sentence_only=False,max_context_len=1024,split_field=''),RemoveMissing()]: events=transform(events)
         events=standardize_events(events)
+    if not _snapshot_matches(finalized_snapshot, root):
+        raise RuntimeError('Evaluator profile changed before model residency; refusing mixed-profile evaluation')
+    if _model is not None and _model_profile != finalized_profile:
+        raise RuntimeError('Evaluator profile changed while a model is resident; refusing mixed-profile evaluation')
     if _model is None:
         on_progress('Loading frozen TRIBE and local feature encoders')
         if str(root) not in sys.path: sys.path.insert(0,str(root))
         from models.load_local_tribe import load_local_tribe
         _model=load_local_tribe(device)
+        if not _snapshot_matches(finalized_snapshot, root):
+            _model = None
+            _model_profile = None
+            raise RuntimeError('Evaluator profile changed during model residency; refusing mixed-profile evaluation')
+        _model_profile = finalized_profile
         _model.data.batch_size=1; _model.data.num_workers=0
     on_progress('Predicting cortical responses')
     predictions,segments=_model.predict(events=events,verbose=False)
@@ -159,12 +373,8 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
     atomic_numpy(output/'prediction.npy',predictions)
     times=[float(x.start) for x in segments]
     atomic_json(output/'segments.json',[{'start':float(x.start),'duration':float(x.duration)} for x in segments])
-    tribe_profile = profile_id()
-    geometry_files = sorted((root/'data/geometry').glob('*.gii.gz'))
-    geometry_manifest = {path.name: _digest(path) for path in geometry_files}
-    geometry_hash = hashlib.sha256(json.dumps(geometry_manifest, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     evidence=summarize(predictions,times)
-    evidence.update({'evaluator':'TRIBE v2','profile':tribe_profile,'kind':'model_predicted_cortical_response','device':device,'segment_durations':[float(x.duration) for x in segments],'source_duration':duration,'modalities':sorted(events.type.unique().tolist()),'transcript_source':transcript_source,'transcript_words':len(words),'input_adaptation':adaptation,'seconds':time.monotonic()-started,'peak_cuda_bytes':torch.cuda.max_memory_allocated() if device == 'cuda' else None,'time_note':'Official segment timestamps retained. TRIBE handles the hemodynamic offset; no extra time shift is applied.','quantization':'Original TRIBE brain checkpoint; locally quantized INT8 video and NF4 base text encoders.','limitations':['Predicted average cortical response, not an individual brain scan.','Not purchase intent, CTR, thoughts, or a calibrated emotion probability.','Quantized end-to-end neuroscience accuracy has not been established.'],'provenance':{'contract_version':'response-provenance/v1','model':{'name':'TRIBE v2','version':tribe_profile},'checkpoint':{'sha256':_digest(root/'tribev2-balanced-qv-local/best.ckpt'),'version':'best.ckpt'},'preprocessing':{'version':'TRIBE official event timeline; profile-bound','sha256':tribe_profile},'geometry':{'version':'fsaverage5-left-right-v1','sha256':geometry_hash,'files':geometry_manifest},'projection':{'version':'not_applicable/tribe-cortical-output-v1','sha256':None,'meaning':'TRIBE cortical output is not a volume projection'},'time_axis':{'version':'normalized-interval-axis/v1','source_duration':duration,'segments':[{'start':float(x.start),'duration':float(x.duration)} for x in segments]}},'emotion_decoder':{'status':'experimental' if config.get('include_kragel') else 'not_requested','reason':'Kragel pattern expression is model-to-model experimental evidence, not calibrated human emotion.'}})
+    evidence.update({'evaluator':'TRIBE v2','profile':finalized_profile,'kind':'model_predicted_cortical_response','device':device,'segment_durations':[float(x.duration) for x in segments],'source_duration':duration,'modalities':sorted(events.type.unique().tolist()),'transcript_source':transcript_source,'transcript_words':len(words),'input_adaptation':adaptation,'seconds':time.monotonic()-started,'peak_cuda_bytes':torch.cuda.max_memory_allocated() if device == 'cuda' else None,'time_note':'Official segment timestamps retained. TRIBE handles the hemodynamic offset; no extra time shift is applied.','quantization':'Original TRIBE brain checkpoint; locally quantized INT8 video and NF4 base text encoders.','limitations':['Predicted average cortical response, not an individual brain scan.','Not purchase intent, CTR, thoughts, or a calibrated emotion probability.','Quantized end-to-end neuroscience accuracy has not been established.'],'provenance':{'contract_version':'response-provenance/v1','model':{'name':'TRIBE v2','version':finalized_profile},'checkpoint':{'sha256':checkpoint_hash,'version':'best.ckpt'},'preprocessing':{'version':'TRIBE official event timeline; profile-bound','sha256':finalized_profile},'geometry':{'version':'fsaverage5-left-right-v1','sha256':geometry_hash,'files':geometry_manifest},'projection':{'version':'not_applicable/tribe-cortical-output-v1','sha256':None,'meaning':'TRIBE cortical output is not a volume projection'},'time_axis':{'version':'normalized-interval-axis/v1','source_duration':duration,'segments':[{'start':float(x.start),'duration':float(x.duration)} for x in segments]}},'emotion_decoder':{'status':'experimental' if config.get('include_kragel') else 'not_requested','reason':'Kragel pattern expression is model-to-model experimental evidence, not calibrated human emotion.'}})
     evidence['hardware_preflight']=preflight
     if config.get('include_tsam'):
         if not config.get('tsam_research_acknowledged'):
@@ -173,7 +383,8 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
             on_progress('Running independent TSAM audiovisual readout on CPU')
             try:
                 from .tsam import predict_video
-                evidence['tsam']=predict_video(path,duration,output)
+                tsam_checkpoint = _profile_hash(finalized_snapshot, 'models/emotion/tsam/weights/tsam_weights.tar')
+                evidence['tsam']=predict_video(path,duration,output,checkpoint_hash=tsam_checkpoint)
             except Exception as exc:
                 evidence['tsam']={'status':'failed','reason':str(exc)[:500]}
         else:
@@ -190,4 +401,8 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
         evidence['response_ensemble']=ensemble(evidence)
     evidence['seconds']=time.monotonic()-started
     atomic_json(output/'evidence.json',evidence)
+    artifact_context = config.get('_artifact_context')
+    if isinstance(artifact_context, dict):
+        publish_artifact_manifest(output, cache_key=artifact_context['cache_key'], profile=finalized_profile,
+                                  asset_sha256=artifact_context['asset_sha256'], profile_manifest=finalized_snapshot['manifest'])
     return evidence

@@ -32,6 +32,14 @@ AUDIO_WINDOWS_MS = (25, 50, 100)
 AUDIO_HOPS_MS = (10, 25, 50)
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open('rb') as stream:
+        for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def preprocessing_contract() -> dict:
     """Exact preprocessing parameters used by the upstream adapter."""
     return {
@@ -114,7 +122,7 @@ def load_model():
     return model, args
 
 
-def predict_video(path: Path, duration: float, output: Path) -> dict:
+def predict_video(path: Path, duration: float, output: Path, checkpoint_hash: str | None = None) -> dict:
     import numpy as np
     import soundfile as sf
     import torch
@@ -164,8 +172,9 @@ def predict_video(path: Path, duration: float, output: Path) -> dict:
                 raise ValueError('Invalid TSAM output; no substitute result is emitted')
             windows.append({**window, 'start': start, 'end': start + WINDOW_SECONDS,
                             'logits': logits.tolist(), 'top_class': LABELS[int(logits.argmax())]})
-    checkpoint = settings().root / 'models/emotion/tsam/weights/tsam_weights.tar'
-    checkpoint_hash = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+    if checkpoint_hash is None:
+        checkpoint = settings().root / 'models/emotion/tsam/weights/tsam_weights.tar'
+        checkpoint_hash = _sha256(checkpoint)
     axis = normalized_axis(windows, duration, source='tsam')
     for window, item in zip(windows, axis):
         window.update({'start_norm': item['start_norm'], 'end_norm': item['end_norm'], 'axis_version': TIME_AXIS_VERSION})

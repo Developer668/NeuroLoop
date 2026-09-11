@@ -1,6 +1,6 @@
 """Bounded local media operations. No remote URLs or arbitrary shell expressions."""
 from __future__ import annotations
-import hashlib, json, os, re, shutil, subprocess
+import hashlib, json, os, re, shutil, subprocess, sys
 from pathlib import Path
 from PIL import Image, ImageOps
 from .config import settings
@@ -11,18 +11,67 @@ FILTERS = {'contrast_up':'eq=contrast=1.08','contrast_down':'eq=contrast=0.92','
 class MediaError(ValueError):
     pass
 
+
+def _runtime_prefixes() -> list[Path]:
+    configured = settings()
+    values = []
+    root = getattr(configured, 'root', None)
+    if root:
+        for name in ('model', 'app'):
+            values.append(Path(root) / '.runtimes' / name)
+    model_python = getattr(configured, 'model_python', None)
+    values.extend([model_python, sys.executable, sys.prefix])
+    prefixes = []
+    seen = set()
+    for value in values:
+        if not value:
+            continue
+        path = Path(value)
+        if path.name.lower() in {'python', 'python.exe'} and path.parent.name.lower() in {'bin', 'scripts'}:
+            path = path.parent.parent
+        try:
+            key = str(path.resolve())
+        except OSError:
+            key = str(path)
+        if key not in seen:
+            seen.add(key)
+            prefixes.append(path)
+    return prefixes
+
+
+def _bundled_ffmpeg(prefix: Path) -> str | None:
+    site_packages = [prefix / 'lib/site-packages', prefix / 'Lib/site-packages']
+    site_packages.extend(sorted((prefix / 'lib').glob('python*/site-packages')))
+    site_packages.extend(sorted((prefix / 'Lib').glob('python*/site-packages')))
+    for folder in site_packages:
+        matches = sorted((folder / 'imageio_ffmpeg' / 'binaries').glob('ffmpeg*'))
+        for match in matches:
+            if match.is_file():
+                return str(match)
+    for relative in ('bin/ffmpeg', 'bin/ffmpeg.exe', 'Scripts/ffmpeg.exe'):
+        candidate = prefix / relative
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
 def ffmpeg() -> str:
     configured=os.getenv('NEUROLOOP_FFMPEG')
     if configured and Path(configured).is_file(): return configured
-    binary=shutil.which('ffmpeg')
-    if binary: return binary
-    folder=settings().root/'.runtimes/model/Lib/site-packages/imageio_ffmpeg/binaries'
-    matches=list(folder.glob('ffmpeg*.exe'))
-    if matches: return str(matches[0])
+    for prefix in _runtime_prefixes():
+        binary = _bundled_ffmpeg(prefix)
+        if binary:
+            return binary
     try:
         import imageio_ffmpeg
-        return imageio_ffmpeg.get_ffmpeg_exe()
-    except ImportError as exc: raise MediaError('FFmpeg is not installed/configured') from exc
+        binary = imageio_ffmpeg.get_ffmpeg_exe()
+        if binary and Path(binary).is_file():
+            return binary
+    except (ImportError, OSError):
+        pass
+    binary=shutil.which('ffmpeg')
+    if binary: return binary
+    raise MediaError('FFmpeg is not installed/configured')
 
 FILE_INPUT_OPTIONS = ['-protocol_whitelist', 'file,pipe', '-format_whitelist', 'mov,matroska,avi,wav,mp3,flac,ogg,aac,image2,image2pipe,png_pipe,jpeg_pipe,webp_pipe']
 
