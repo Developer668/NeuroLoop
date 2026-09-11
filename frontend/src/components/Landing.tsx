@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { Brand } from "./UI";
 import { MotionFooter } from "./ReleaseMotion";
+import { IntegrationStrip } from "./IntegrationStrip";
 const BrainCanvas = dynamic(() => import("./BrainCanvas"), {
   ssr: false,
   loading: () => (
@@ -322,6 +323,30 @@ export default function Landing() {
           </Link>
         </div>
       </section>
+
+      <IntegrationStrip />
+      <aside className="build-easter-egg" aria-label="Behind the build">
+        <details>
+          <summary>
+            <span>
+              <span className="eyebrow">BEHIND THE BUILD</span>
+              <span className="build-easter-egg-title">Built locally. Tested emotionally.</span>
+            </span>
+            <span className="build-easter-egg-toggle" aria-hidden="true">+</span>
+          </summary>
+          <figure>
+            <img
+              src="/brand/neuroloop-tribe-local-meme.png"
+              width={1448}
+              height={1086}
+              loading="lazy"
+              decoding="async"
+              alt="Woman yelling at a cat: I said run TRIBE locally. The cat replies: You have 12 GB of VRAM. Codex and Meta TRIBE v2 badges. Caption: The model fits. The laptop has questions."
+            />
+            <figcaption>A little humor from building NeuroLoop on a laptop.</figcaption>
+          </figure>
+        </details>
+      </aside>
 
       <MotionFooter />
     </main>
