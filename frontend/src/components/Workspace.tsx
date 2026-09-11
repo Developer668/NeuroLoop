@@ -50,6 +50,7 @@ import {
   Empty,
   AssetVisual,
   Modal,
+  AnimatedNumber,
   errorText,
   dateText,
 } from "./UI";
@@ -446,7 +447,7 @@ export default function Workspace() {
         {!(view === "runs" && runId) &&
           view !== "brain" &&
           view !== "neuro" && (
-            <div className="page-title">
+            <div className="page-title" key={view}>
               <div>
                 <span className="eyebrow">{heading[0]}</span>
                 <h1>{heading[1]}</h1>
@@ -517,7 +518,13 @@ export default function Workspace() {
                       <Component size={13} />
                       {String(label)}
                     </div>
-                    <strong>{String(value)}</strong>
+                    <strong>
+                      {Number.isFinite(Number(value)) ? (
+                        <AnimatedNumber value={Number(value)} />
+                      ) : (
+                        String(value)
+                      )}
+                    </strong>
                     <small>{String(description)}</small>
                   </div>
                 );

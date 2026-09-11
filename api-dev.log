@@ -1,0 +1,36 @@
+INFO:     Started server process [44728]
+INFO:     Waiting for application startup.
+[09/11/26 02:26:08] INFO     StreamableHTTP      streamable_http_manager.py:164
+                             session manager                                   
+                             started                                           
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8010 (Press CTRL+C to quit)
+[9/11/2026 2:26:30 AM] INFO     HTTP Request: GET               _client.py:1025
+                                https://trace.wandb.ai/server_i                
+                                nfo "HTTP/1.1 200 OK"                          
+[9/11/2026 2:26:31 AM] INFO     HTTP Request: POST              _client.py:1025
+                                https://api.wandb.ai/graphql                   
+                                "HTTP/1.1 200 OK"                              
+C:\Users\wenje\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_generate_schema.py:663: ArbitraryTypeWarning: <built-in function allocate_lock> is not a Python type (it may be an instance of an object), Pydantic will allow any object with no validation since we cannot even enforce that the input is an instance of the given type. To get rid of this error wrap the type with `pydantic.SkipValidation`.
+  warnings.warn(
+[9/11/2026 2:26:32 AM] INFO     HTTP Request: POST              _client.py:1025
+                                https://api.wandb.ai/graphql                   
+                                "HTTP/1.1 200 OK"                              
+[9/11/2026 2:26:33 AM] INFO     HTTP Request: GET               _client.py:1025
+                                https://pypi.org/pypi/weave/jso                
+                                n "HTTP/1.1 200 OK"                            
+[36m[1mweave[0m: weave version 0.53.9 is available!  To upgrade, please run:
+[36m[1mweave[0m:  $ pip install weave --upgrade
+                       INFO     weave version 0.53.9 is      init_message.py:31
+                                available!  To upgrade,                        
+                                please run:                                    
+                                 $ pip install weave                           
+                                --upgrade                                      
+[36m[1mweave[0m: Logged in as Weights & Biases user: jerry-wen0616.
+[36m[1mweave[0m: View Weave data at https://wandb.ai/jerry-wen0616-santa-clara-university/neuroloop/weave
+                       INFO     Logged in as Weights &      init_message.py:124
+                                Biases user: jerry-wen0616.                    
+                                View Weave data at                             
+                                https://wandb.ai/jerry-wen0                    
+                                616-santa-clara-university/                    
+                                neuroloop/weave                                

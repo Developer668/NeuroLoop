@@ -49,34 +49,24 @@ export function PixelLoading({
 }
 
 export function BackgroundPaths() {
-  const reduce = useReducedMotion();
-  const ref = useRef<HTMLDivElement>(null);
-  const visible = useInView(ref);
+  // Lightweight decorative drift: plain SVG paths animated with CSS
+  // stroke-dashoffset (cheap, GPU-friendly), paused unless the footer is
+  // in view. The old version ran 96 JS-driven motion.path animations and
+  // was the main source of footer jank.
   return (
-    <div ref={ref} className="background-paths" aria-hidden="true">
+    <div className="background-paths" aria-hidden="true">
       <svg viewBox="0 0 696 316" fill="none">
         {[-1, 1].flatMap((position) =>
-          Array.from({ length: 24 }, (_, i) => (
-            <motion.path
+          Array.from({ length: 8 }, (_, i) => (
+            <path
               key={`${position}-${i}`}
+              className="bg-path"
+              style={{ animationDelay: `${i * -1.7}s` }}
               d={`M-${380 - i * 5 * position} -${189 + i * 6}C-${380 - i * 5 * position} -${189 + i * 6} -${312 - i * 5 * position} ${216 - i * 6} ${152 - i * 5 * position} ${343 - i * 6}C${616 - i * 5 * position} ${470 - i * 6} ${684 - i * 5 * position} ${875 - i * 6} ${684 - i * 5 * position} ${875 - i * 5}`}
               stroke="currentColor"
-              strokeWidth={0.6 + i * 0.025}
-              initial={false}
-              animate={
-                reduce || !visible
-                  ? { opacity: 0.25 }
-                  : {
-                      pathLength: [0.35, 1, 0.35],
-                      pathOffset: [0, 1, 0],
-                      opacity: [0.12, 0.4, 0.12],
-                    }
-              }
-              transition={{
-                duration: 22 + i * 0.5,
-                repeat: Infinity,
-                ease: "linear",
-              }}
+              strokeWidth={0.6 + i * 0.1}
+              pathLength={1}
+              strokeDasharray="0.42 1"
             />
           )),
         )}
