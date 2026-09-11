@@ -61,6 +61,7 @@ class OwnedJob:
     def terminate(self, process, timeout=10):
         """Stop a process and all descendants owned by its isolated group."""
         group = None
+        owned_group = False
         if os.name != 'nt':
             group = self.groups.pop(process.pid, None)
             try:
@@ -69,7 +70,8 @@ class OwnedJob:
                 pass
             # The supervisor must never signal its own process group. The
             # worker starts run children with start_new_session=True below.
-            if group is not None and group != os.getpgrp():
+            owned_group = group is not None and group != os.getpgrp()
+            if owned_group:
                 try:
                     os.killpg(group, signal.SIGTERM)
                 except ProcessLookupError:
@@ -82,13 +84,10 @@ class OwnedJob:
             if process.poll() is None:
                 process.terminate()
 
-        if process.poll() is not None:
-            return
-
         try:
             process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            if os.name != 'nt' and group is not None and group != os.getpgrp():
+            if owned_group:
                 try:
                     os.killpg(group, signal.SIGKILL)
                 except ProcessLookupError:
@@ -96,3 +95,12 @@ class OwnedJob:
             if process.poll() is None:
                 process.kill()
             process.wait(timeout=5)
+        finally:
+            # The group leader can exit while a descendant ignores SIGTERM.
+            # Escalate the still-owned group even when process.wait() did not
+            # time out, otherwise an orphan can survive the supervisor.
+            if owned_group:
+                try:
+                    os.killpg(group, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass

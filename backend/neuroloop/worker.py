@@ -87,7 +87,10 @@ def load_prediction(item: Evaluation) -> np.ndarray:
     # it keeps reference scores across candidate evaluations.
     mapped=np.load(item.prediction_path,allow_pickle=False,mmap_mode='r')
     try:
-        return mapped.copy()
+        # np.memmap.copy() preserves the memmap subclass on the bundled
+        # NumPy runtime.  Force a plain, owning ndarray so later scoring does
+        # not retain the backing file mapping or its descriptor.
+        return np.array(mapped, copy=True, subok=False, order='C')
     finally:
         close_mmap(mapped)
 
@@ -343,9 +346,8 @@ def supervise_run(identity: str) -> None:
             time.sleep(0.5)
         finish_interrupted(identity, f'Run process exited before completion (exit {child.returncode}); completed evidence preserved')
     finally:
+        job.terminate(child)
         job.close()
-        if child.poll() is None:
-            job.terminate(child)
 
 
 def main() -> None:

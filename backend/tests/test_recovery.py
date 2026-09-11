@@ -110,6 +110,32 @@ def test_direct_worker_entry_honors_execution_hold(monkeypatch):
         assert row.status == 'failed' and 'paused' in row.stop_reason
 
 
+def test_direct_evaluation_entry_honors_execution_hold(monkeypatch, tmp_path):
+    import runpy
+    import shutil
+    from neuroloop import execution_guard, inference
+
+    identity = run_record()
+    execution_guard.hold_execution('test hold', identity, {'gpu': None})
+    root = Path(__file__).resolve().parents[2]
+    output = root / 'data/results' / f'direct-entry-hold-{tmp_path.name}'
+    request = output / 'evaluation-request.json'
+    output.mkdir(parents=True, exist_ok=True)
+    atomic_json(request, {'path': str(root / 'data/input.mp4'), 'kind': 'video',
+                          'details': {}, 'config': {}, 'output': str(output)})
+    called = []
+    monkeypatch.setattr(inference, '_evaluate_in_process', lambda *args: called.append(True))
+    monkeypatch.setattr(sys, 'argv', [str(root / 'scripts/evaluation_entry.py'), str(request)])
+    try:
+        with pytest.raises(SystemExit) as stopped:
+            runpy.run_path(str(root / 'scripts/evaluation_entry.py'), run_name='__main__')
+        assert stopped.value.code == 1
+        assert called == []
+        assert 'paused' in json.loads((output / 'process-error.json').read_text())['error']
+    finally:
+        shutil.rmtree(output, ignore_errors=True)
+
+
 @pytest.mark.skipif(os.name == 'nt', reason='POSIX process-group ownership')
 def test_timeout_terminates_run_descendants(monkeypatch):
     identity = run_record(config={'request': {'max_seconds': 0.1}})
@@ -119,7 +145,7 @@ def test_timeout_terminates_run_descendants(monkeypatch):
     def grouped_child(*args, **kwargs):
         child = launch([
             sys.executable, '-c',
-            'import subprocess,sys,time; p=subprocess.Popen([sys.executable,"-c","import time; time.sleep(60)"]); print(p.pid,flush=True); time.sleep(60)',
+            'import subprocess,sys,time; p=subprocess.Popen([sys.executable,"-c","import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)"]); print(p.pid,flush=True); time.sleep(60)',
         ], stdout=subprocess.PIPE, text=True, start_new_session=True)
         children.append(child)
         return child
@@ -129,11 +155,20 @@ def test_timeout_terminates_run_descendants(monkeypatch):
     assert children[0].poll() is not None
     descendant_pid = int(children[0].stdout.readline().strip())
     import psutil
-    descendant = psutil.Process(descendant_pid)
     try:
-        descendant.wait(timeout=5)
-    except psutil.TimeoutExpired:
-        pytest.fail('run descendant survived supervisor timeout')
+        descendant = psutil.Process(descendant_pid)
+    except psutil.NoSuchProcess:
+        # Group cleanup may reap the descendant before psutil constructs its
+        # handle.  That is the strongest possible termination outcome.
+        descendant = None
+    if descendant is not None:
+        try:
+            descendant.wait(timeout=5)
+        except psutil.NoSuchProcess:
+            # The process exited between construction and wait().
+            pass
+        except psutil.TimeoutExpired:
+            pytest.fail('run descendant survived supervisor timeout')
     with Session() as db:
         assert db.get(Run, identity).status == 'failed'
 
@@ -155,6 +190,7 @@ def test_worker_prediction_load_closes_mmap(tmp_path):
     np.save(path, np.ones((2, 20484), dtype=np.float32), allow_pickle=False)
     loaded = worker.load_prediction(SimpleNamespace(prediction_path=str(path)))
     assert not isinstance(loaded, np.memmap)
+    assert loaded.flags.owndata
     assert loaded.shape == (2, 20484)
 
 
