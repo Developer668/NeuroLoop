@@ -497,8 +497,11 @@ def pre_evaluation_gate(candidate: Any, kind: str | None = None, *, constraints:
         baseline_details = baseline_quality.metadata
     if contract is None:
         return PreEvaluationReport(True, quality)
-    if not candidate_details:
-        candidate_details = quality.metadata
+    # Decoded file facts are authoritative for media properties while editable
+    # manifests remain authoritative for copy/logo/object constraints.
+    candidate_details = {**candidate_details, **quality.metadata}
+    if baseline_details:
+        baseline_details = dict(baseline_details)
     constraint_report = contract.check(candidate_details, baseline_details or baseline)
     return PreEvaluationReport(constraint_report.passed, quality, constraint_report)
 

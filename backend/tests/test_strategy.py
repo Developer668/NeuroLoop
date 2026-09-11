@@ -208,3 +208,58 @@ def test_worker_preserves_previous_best_when_all_siblings_fail(client, headers, 
         assert run.result["best_asset_id"] == asset["id"]
         assert run.result["best_metric"]["value"] == pytest.approx(0.4)
         assert len(experiments) == 3 and all(item.decision == "invalid" for item in experiments)
+
+
+def test_worker_rejects_failed_pre_evaluation_gate_before_model_evaluation(client, headers, monkeypatch):
+    from backend.tests.test_contracts import project, upload
+    from neuroloop import worker
+    from neuroloop.db import Experiment, Run, Session
+    from neuroloop.media_quality import MediaQualityReport, PreEvaluationReport
+
+    asset = upload(client, headers, name="gate-before-model.png")
+    project_row = project(client, headers, asset)
+    queued = client.post(
+        "/api/runs",
+        headers=headers,
+        json={
+            "project_id": project_row["id"],
+            "mode": "optimize",
+            "objective": "response_target",
+            "target": {"emotions": {"happiness": {"desired": 0.8}}},
+            "include_kragel": True,
+            "allow_static_presentation": True,
+            "operators": ["brightness_up"],
+            "max_evaluations": 2,
+            "target_score": 0.95,
+        },
+    )
+    run_id = queued.json()["id"]
+    original = worker.get_asset(asset["id"])
+    calls = {"evaluation": 0, "gate": 0}
+
+    def fake_evaluation(identity, selected, config):
+        calls["evaluation"] += 1
+        if calls["evaluation"] > 1:
+            raise AssertionError("candidate reached the model evaluator")
+        from neuroloop.db import Evaluation
+        return Evaluation(id="gate-baseline", asset_id=selected.id, cache_key="gate-baseline-cache", evaluator="fixture", profile="fixed-profile", evidence={"response_ensemble": {"profile": "fixture", "values": {"happiness": 0.2}, "sources": {}, "source_weights": {}, "active_sources": ["fixture"], "disagreement": {}, "mean_disagreement": None, "confidence": "fixture", "interpretation": "control-flow fixture"}}, prediction_path=None, duration_seconds=0)
+
+    def reject_gate(*args, **kwargs):
+        calls["gate"] += 1
+        quality = MediaQualityReport(False, "image", original.path, violations=("corrupt candidate",))
+        return PreEvaluationReport(False, quality)
+
+    monkeypatch.setattr(worker, "evaluation", fake_evaluation)
+    monkeypatch.setattr(worker, "render_candidate", lambda *args, **kwargs: original)
+    monkeypatch.setattr(worker, "pre_evaluation_gate", reject_gate)
+
+    with pytest.raises(worker.StopRun, match="No untested permitted operators"):
+        worker.execute_run(run_id)
+
+    assert calls == {"evaluation": 1, "gate": 1}
+    with Session() as db:
+        run = db.get(Run, run_id)
+        experiment = db.query(Experiment).filter(Experiment.run_id == run_id).one()
+        assert run.result["best_asset_id"] == asset["id"]
+        assert experiment.decision == "invalid"
+        assert experiment.evidence["pre_evaluation_gate"]["quality"]["violations"] == ["corrupt candidate"]

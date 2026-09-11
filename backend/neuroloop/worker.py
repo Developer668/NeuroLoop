@@ -13,6 +13,7 @@ from .readout import compare_references,METRIC
 from .response import target_score as response_target_score
 from .services import register_asset
 from .integrations import planner_proposal,record_evidence
+from .media_quality import pre_evaluation_gate
 from .strategy import CreativeStrategist,InterventionProposal,operator_implementation
 from .telemetry import traced
 
@@ -213,7 +214,7 @@ def _create_experiment_batch(
     return rows, next_sequence
 
 
-def _mark_invalid_experiment(identity: str, experiment_id: str, reason: str, error_type: str) -> None:
+def _mark_invalid_experiment(identity: str, experiment_id: str, reason: str, error_type: str, evidence: dict | None = None) -> None:
     with Session.begin() as db:
         row = db.get(Experiment, experiment_id)
         if row:
@@ -223,6 +224,7 @@ def _mark_invalid_experiment(identity: str, experiment_id: str, reason: str, err
                 "reason": reason,
                 "exception_type": error_type,
                 "policy_update": "omitted_invalid_candidate",
+                "pre_evaluation_gate": evidence,
             }
     emit(
         identity,
@@ -373,6 +375,11 @@ def execute_run(identity: str) -> None:
                 with Session.begin() as db:
                     saved=db.get(Experiment,row.id)
                     if saved: saved.asset_id=candidate.id
+                gate=pre_evaluation_gate(candidate,candidate.kind,constraints=project['constraints'],baseline=original)
+                if not gate.passed:
+                    _mark_invalid_experiment(identity,row.id,gate.message,'PreEvaluationRejected',gate.evidence)
+                    outcomes.append({'row':row,'proposal':proposal,'valid':False,'seconds':time.monotonic()-beginning,'error':gate.message})
+                    continue
                 candidate_eval=evaluation(identity,candidate,config)
                 if candidate_eval.profile!=baseline.profile:
                     raise RuntimeError('Evaluator changed during the run; refusing mixed-profile comparison')
@@ -386,7 +393,7 @@ def execute_run(identity: str) -> None:
                     if not old or not old.get('per_reference') or not metric.get('per_reference'):
                         raise ValueError('Candidate/reference evidence is incomplete')
                     worst_delta=min(a['value']-b['value'] for a,b in zip(metric['per_reference'],old['per_reference']))
-                outcomes.append({'row':row,'proposal':proposal,'candidate':candidate,'evaluation':candidate_eval,'metric':metric,'gain':gain,'worst_delta':worst_delta,'seconds':time.monotonic()-beginning,'valid':True})
+                outcomes.append({'row':row,'proposal':proposal,'candidate':candidate,'evaluation':candidate_eval,'metric':metric,'gain':gain,'worst_delta':worst_delta,'seconds':time.monotonic()-beginning,'valid':True,'gate':gate})
             except StopRun:
                 raise
             except Exception as exc:
@@ -401,7 +408,7 @@ def execute_run(identity: str) -> None:
         for outcome in valid:
             outcome['decision']='kept' if winner is outcome else ('tradeoff' if outcome['worst_delta'] is not None and outcome['worst_delta'] < -config['min_gain'] else 'reverted')
             row=outcome['row'];candidate_eval=outcome['evaluation'];metric=outcome['metric'];gain=outcome['gain']
-            evidence={'valid':True,'evaluation_id':candidate_eval.id,'metric':metric,'gain':gain,'worst_reference_delta':outcome['worst_delta'],'constraint_checks':{'duration_preserved':True},'reference_tradeoff':outcome['decision']=='tradeoff','selection':'winner' if winner is outcome else 'rejected_sibling','lineage_id':outcome['proposal'].lineage_id,'lineage':outcome['proposal'].lineage_id,'sibling_ids':(row.specification or {}).get('sibling_ids',[]),'siblings':(row.specification or {}).get('sibling_ids',[]),'response_ensemble':candidate_eval.evidence.get('response_ensemble')}
+            evidence={'valid':True,'evaluation_id':candidate_eval.id,'metric':metric,'gain':gain,'worst_reference_delta':outcome['worst_delta'],'pre_evaluation_gate':outcome['gate'].evidence,'reference_tradeoff':outcome['decision']=='tradeoff','selection':'winner' if winner is outcome else 'rejected_sibling','lineage_id':outcome['proposal'].lineage_id,'lineage':outcome['proposal'].lineage_id,'sibling_ids':(row.specification or {}).get('sibling_ids',[]),'siblings':(row.specification or {}).get('sibling_ids',[]),'response_ensemble':candidate_eval.evidence.get('response_ensemble')}
             with Session.begin() as db:
                 saved=db.get(Experiment,row.id)
                 saved.candidate_score=float(metric['value']);saved.decision=outcome['decision'];saved.evidence=evidence
