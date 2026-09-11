@@ -2,7 +2,7 @@
 
 Updated: 2026-09-11 (America/Los_Angeles)
 
-Current orchestration state: **PAUSED BY PARENT TASK HANDOFF**. Native multi-agent orchestration is expected to take over. Do not provision duplicate workstreams from this ledger without first reconciling the two task IDs and worktrees below.
+Current orchestration state: **ACTIVE — DEPENDENCY-GATED INTEGRATION**. The two launcher-created tasks were reconciled as workstreams 1 and 2; no duplicate workstream was created. Later workstreams are provisioned only after their prerequisite integration gates pass.
 
 ## Protected baseline
 
@@ -34,10 +34,10 @@ Every workstream uses `gpt-5.6-luna` with maximum reasoning in an isolated Codex
 
 | # | Workstream | Dependencies | Status | Guardian verdict |
 |---|---|---|---|---|
-| 1 | Protected baseline plus real-model/MPS memory/E2E investigation | baseline | PAUSE REQUESTED | not reviewed |
-| 2 | Scientific response stack: TRIBE/Kragel/TSAM/ensemble, temporal targets, provenance | baseline | PAUSE REQUESTED | not reviewed |
-| 3 | CreativeStrategist, typed interventions, A/B/C branching, policy learning | 2 contracts | QUEUED | pending |
-| 4 | CreativeConstraints plus media quality/corruption gates | 2 contracts | QUEUED | pending |
+| 1 | Protected baseline plus real-model/MPS memory/E2E investigation | baseline | BLOCKED | accepted investigation; real-model release gate blocked |
+| 2 | Scientific response stack: TRIBE/Kragel/TSAM/ensemble, temporal targets, provenance | baseline | COMPLETE | accepted at `3b2b4e3` |
+| 3 | CreativeStrategist, typed interventions, A/B/C branching, policy learning | 2 contracts | ACTIVE | pending review |
+| 4 | CreativeConstraints plus media quality/corruption gates | 2 contracts | ACTIVE | pending review |
 | 5 | Complete MCP closed-loop contract and external-agent iteration | 2, 3, 4 | QUEUED | pending |
 | 6 | MCP adversarial/security/reliability and REST/MCP parity | 5 | QUEUED | pending |
 | 7 | ImprovementBrief/Copilot and grounded Neuro assistant | 2, 3, 5 | QUEUED | pending |
@@ -58,9 +58,9 @@ Every workstream uses `gpt-5.6-luna` with maximum reasoning in an isolated Codex
 
 ## Integration review log
 
-- No workstream result has been accepted or merged.
-- Luna W1 task: `01a08fef-23f5-7121-9f4c-2bb547fa31a5` (client setup ID `client-new-thread:628faad5-2da6-4a62-aea5-b603fb62e2c2`). Its latest report verified the clean protected commit and noted that quarantine/runtime receipts are external to the worktree. A pause message was sent while its turn still reported active.
-- Luna W2 task: `01a08fef-23f5-7121-9f4c-2bd112c9d3b5` (client setup ID `client-new-thread:55378ad2-dfde-46b2-a775-96234a0a9ecc`). Its latest report identified permissive malformed-window handling, unsupported Kragel dimensions represented as zero, no stable temporal axis, and incomplete projection cache identity. A pause message was sent while its turn still reported active.
-- Preserved Codex worktrees: `/Users/adityadas/.codex/worktrees/1ccf/NeuroLoop` and `/Users/adityadas/.codex/worktrees/4f81/NeuroLoop`. At handoff recording time both were clean, detached at `f5e1132c5513319d41a15a40c461b9b73210f60b`, with no feature diff and no new commit.
-- Workstreams 3-10 were deliberately not provisioned because their dependency gates had not passed.
-- The integration branch contains only this orchestration ledger on top of the protected baseline.
+- Baseline rerun on the integration worktree with the pinned app runtime: `117 passed, 1 skipped`. A clean ad-hoc runtime also exposed missing `data/tmp` bootstrapping and FFmpeg discovery assumptions; those are assigned to workstream 8.
+- Luna W1 task `01a08fef-23f5-7121-9f4c-2bb547fa31a5` returned `BLOCKED` at `75d560dd27494d97e5bc69d5808bd12b25a2284d`. Guardian reviewed the complete diff, ran profiler compile/self-test, verified it imports no model code and signals no processes, and integrated it as `a78c670`. The active MPS quarantine recorded 299,040,768 bytes available versus the 1.5 GiB reserve; no fresh full response loop exists.
+- Luna W2 task `01a08fef-23f5-7121-9f4c-2bd112c9d3b5` returned `COMPLETE` at `45ac45e2563cc694b58d8ad50805bc2819702361`. Guardian inspected the scientific contracts, reran 24 focused tests and the full suite (`127 passed, 1 skipped`), then integrated it as `3b2b4e3`.
+- Luna W3 task `01a09003-ace0-7311-bacd-aee0b765a847` (client setup `client-new-thread:8275d940-d91e-47ab-b91f-79b5faa0777e`) is active in `/Users/adityadas/.codex/worktrees/8368/NeuroLoop` from reviewed integration commit `3b2b4e3`.
+- Luna W4 task `01a09003-ace0-7311-bacd-aefbd7ae944b` (client setup `client-new-thread:70731fe4-108f-4cc2-b123-16d483fab812`) is active in `/Users/adityadas/.codex/worktrees/c7e1/NeuroLoop` from reviewed integration commit `3b2b4e3`.
+- The original checkout remains dirty and untouched. Protected and completed worktrees remain preserved; no model/data/cache/database/quarantine asset was removed or overwritten.
