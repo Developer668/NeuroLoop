@@ -6,6 +6,7 @@ import "./refinement.css";
 import "./release.css";
 import "./neuro.css";
 import "./footer.css";
+import "./dashboard.css";
 // Responsive rules live with the components' shared design tokens in globals.css.
 export const metadata: Metadata = {
   title: "NeuroLoop — Every creative decision, considered.",

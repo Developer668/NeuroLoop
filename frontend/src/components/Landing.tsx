@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowUpRight,
   ArrowRight,
@@ -23,6 +23,7 @@ const BrainCanvas = dynamic(() => import("./BrainCanvas"), {
 });
 export default function Landing() {
   const root = useRef<HTMLElement>(null);
+  const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     const nodes = root.current?.querySelectorAll("[data-reveal]");
     const observer = new IntersectionObserver(
@@ -36,12 +37,63 @@ export default function Landing() {
       { threshold: 0.12 },
     );
     nodes?.forEach((node) => observer.observe(node));
-    return () => observer.disconnect();
+    // Scroll-aware nav: condense into a deeper glass bar once the page moves.
+    const onScroll = () => setScrolled(window.scrollY > 12);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    // Pointer-tracked spotlight in the hero observatory (fine pointers only,
+    // never when the visitor prefers reduced motion).
+    const hero = root.current?.querySelector<HTMLElement>(".landing-hero");
+    const fine =
+      window.matchMedia("(hover: hover) and (pointer: fine)").matches &&
+      !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const onMove = (event: PointerEvent) => {
+      if (!hero) return;
+      const rect = hero.getBoundingClientRect();
+      hero.style.setProperty("--mx", `${event.clientX - rect.left}px`);
+      hero.style.setProperty("--my", `${event.clientY - rect.top}px`);
+    };
+    if (fine && hero) hero.addEventListener("pointermove", onMove);
+    // Eased count-up for the observatory readouts. The markup already ships
+    // the final values, so hydration stays stable; we only animate when the
+    // visitor allows motion.
+    const counters = root.current?.querySelectorAll<HTMLElement>(
+      "[data-count-to]",
+    );
+    let raf = 0;
+    if (
+      counters?.length &&
+      !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      const started = performance.now();
+      const duration = 1600;
+      const tick = (now: number) => {
+        const t = Math.min(1, (now - started) / duration);
+        const eased = 1 - Math.pow(1 - t, 3);
+        counters.forEach((node) => {
+          const target = Number(node.dataset.countTo || "0");
+          const pad = Number(node.dataset.countPad || "0");
+          const value = Math.round(target * eased);
+          const label = pad
+            ? String(value).padStart(pad, "0")
+            : value.toLocaleString("en-US");
+          if (node.firstChild) node.firstChild.textContent = label;
+        });
+        if (t < 1) raf = requestAnimationFrame(tick);
+      };
+      raf = requestAnimationFrame(tick);
+    }
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("scroll", onScroll);
+      if (fine && hero) hero.removeEventListener("pointermove", onMove);
+      cancelAnimationFrame(raf);
+    };
   }, []);
   return (
     <main className="landing" ref={root} id="top">
       <div className="reading-progress" aria-hidden="true" />
-      <nav className="landing-nav">
+      <nav className={"landing-nav" + (scrolled ? " scrolled" : "")}>
         <Brand />
         <div className="landing-nav-links">
           <a href="#how-it-works">How it works</a>
@@ -95,10 +147,10 @@ export default function Landing() {
           <div className="orbit-label label-top">THE CORTICAL OBSERVATORY</div>
           <BrainCanvas publicMesh cinematic />
           <div className="orbit-label label-bottom">
-            <span>
+            <span data-count-to="20484">
               20,484<small>surface vertices</small>
             </span>
-            <span>
+            <span data-count-to="2" data-count-pad="2">
               02<small>hemispheres</small>
             </span>
             <ScanLine size={22} />

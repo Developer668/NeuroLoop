@@ -185,3 +185,30 @@
 [data-motion="reduced"] .footer-curtain {
   display: none;
 }
+
+/* Decorative background paths: cheap CSS dash-drift (replaces the old
+   96 JS-driven path animations that caused scroll jank). Paths stay
+   paused until the footer actually enters the viewport, and are disabled
+   entirely under reduced motion. */
+.background-paths .bg-path {
+  opacity: 0.25;
+  animation: path-drift 26s linear infinite;
+  animation-play-state: paused;
+}
+.motion-footer[data-visible="true"] .background-paths .bg-path {
+  animation-play-state: running;
+}
+@keyframes path-drift {
+  to {
+    stroke-dashoffset: -1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .background-paths .bg-path {
+    animation: none;
+  }
+}
+[data-motion="reduced"] .background-paths .bg-path {
+  animation: none;
+}
+

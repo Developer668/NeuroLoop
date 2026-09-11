@@ -16,6 +16,32 @@ export function ProfileAvatar() {
   return <UserRound size={19} strokeWidth={1.5} aria-hidden="true" />;
 }
 
+/**
+ * Eased count-up for dashboard metrics. The final value is rendered on the
+ * server and on first paint, so hydration stays stable; the animation only
+ * runs client-side and only when the visitor allows motion.
+ */
+export function AnimatedNumber({ value }: { value: number }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const started = performance.now();
+    const duration = 1200;
+    let raf = 0;
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - started) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      node.textContent = Math.round(value * eased).toLocaleString("en-US");
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value]);
+  return <span ref={ref}>{value.toLocaleString("en-US")}</span>;
+}
+
 export function Brand() {
   return (
     <Link href="/" className="brand" aria-label="NeuroLoop home">
