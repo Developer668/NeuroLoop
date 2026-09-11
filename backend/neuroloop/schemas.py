@@ -3,7 +3,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True, populate_by_name=True)
 
 class ProjectCreate(StrictModel):
     name: str = Field(min_length=1, max_length=120)
@@ -28,21 +28,69 @@ class EmotionTarget(StrictModel):
     desired: float = Field(ge=0, le=1)
     weight: float = Field(default=1.0, gt=0, le=5)
 
-class ResponseTarget(StrictModel):
-    goal: str = Field(default='', max_length=1000)
+
+class NormalizedTimeWindow(StrictModel):
+    """A source-duration-normalized interval, independent of prediction rows."""
+
+    start: float = Field(ge=0, le=1)
+    end: float = Field(gt=0, le=1)
+    label: str = Field(default='', max_length=120)
+
+    @model_validator(mode='after')
+    def ordered(self):
+        if self.end <= self.start:
+            raise ValueError('Time-window end must follow start')
+        return self
+
+
+class TargetWindow(NormalizedTimeWindow):
+    id: str = Field(default='', max_length=120)
+    weight: float = Field(default=1.0, gt=0, le=5)
     emotions: dict[EmotionName, EmotionTarget] = Field(default_factory=dict)
 
     @model_validator(mode='after')
-    def nonempty(self):
+    def has_emotions(self):
         if not self.emotions:
-            raise ValueError('At least one emotion target is required')
+            raise ValueError('Each target window requires at least one emotion target')
         return self
+
+
+class ResponseTarget(StrictModel):
+    goal: str = Field(default='', max_length=1000)
+    emotions: dict[EmotionName, EmotionTarget] = Field(default_factory=dict)
+    version: Literal['target-spec/v1'] = 'target-spec/v1'
+    scope: Literal['whole_creative', 'time_window', 'multi_window'] = 'whole_creative'
+    time_window: NormalizedTimeWindow | None = None
+    windows: list[TargetWindow] = Field(default_factory=list, max_length=16)
+    # Additive spelling for clients that pluralize this field.
+    time_windows: list[TargetWindow] = Field(default_factory=list, max_length=16)
+
+    @model_validator(mode='after')
+    def nonempty(self):
+        if self.windows and self.time_windows:
+            raise ValueError('Use windows or time_windows, not both')
+        selected_windows = self.windows or self.time_windows
+        if self.time_window is not None and selected_windows:
+            raise ValueError('Use one time_window or multiple windows, not both')
+        if not self.emotions and not selected_windows and self.time_window is None:
+            raise ValueError('At least one emotion target is required')
+        if self.time_window is not None and self.scope == 'whole_creative':
+            self.scope = 'time_window'
+        if selected_windows and self.scope == 'whole_creative':
+            self.scope = 'multi_window'
+        if self.scope == 'time_window' and self.time_window is None and not selected_windows:
+            raise ValueError('A time_window scope requires a normalized time window')
+        return self
+
+
+# Public scientific-contract name; ResponseTarget remains the compatibility name.
+TargetSpec = ResponseTarget
 
 class RunCreate(StrictModel):
     project_id: str
     mode: Literal['analyze', 'compare', 'optimize'] = 'analyze'
     objective: Literal['reference_similarity','response_target'] = 'reference_similarity'
-    target: ResponseTarget | None = None
+    target: TargetSpec | None = None
     max_evaluations: int = Field(default=4, ge=1, le=12)
     max_seconds: int = Field(default=1800, ge=30, le=7200)
     min_gain: float = Field(default=0.005, ge=0.0001, le=0.25)

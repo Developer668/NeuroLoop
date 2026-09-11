@@ -44,6 +44,13 @@ and [original implementation](https://github.com/gmontana/DecodingViewerEmotions
 Any older verification report is historical and is not evidence that this checkout
 contains the assets.
 
+When those assets are installed, the adapter is configured for 12 RGB segments,
+one three-channel mel-spectrogram segment, non-overlapping five-second windows,
+10 FPS extraction, 256-pixel video height, and the upstream 224-pixel transform.
+It preserves source audio rate and reports incomplete tails rather than inventing
+coverage. These are implementation contracts, not evidence that TSAM is currently
+installed or accurate on advertisements.
+
 ## Anatomy: working
 
 The Destrieux atlas fetched through Nilearn is explicitly provided on fsaverage5. Both hemisphere label arrays contain 10,242 vertices. The application summarizes 148 anatomical parcels in the same left/right order as TRIBE, without inferring emotion or psychological function. Parcel means, cortical timelines, and compatible response-difference overlays are derived from saved numerical arrays.
@@ -53,7 +60,7 @@ Source: [Nilearn's surface Destrieux atlas documentation](https://nilearn.github
 ## Kragel: install-later compatibility gate
 
 The current checkout does not contain the seven Kragel source volume pairs. The
-TRIBE-derived adapter remains scaffolding only; its capability status is
+TRIBE-derived adapter is inactive; its capability status is
 `missing_assets`, and selecting Kragel is rejected before queueing until the
 expected volumes and fsaverage5 geometry are present. No Kragel asset is claimed
 as downloaded, registered, or validated here.
@@ -65,9 +72,31 @@ TRIBE's 10,242 vertices per hemisphere. Before activation, document a verified
 registration/projection route, medial-wall handling, scoring and normalization,
 source hashes, reference-score reproduction, and held-out transfer results.
 
+The inactive adapter implements an explicit volume-to-surface projection contract:
+inverse-affine sampling at five points from white to pial, left/right fsaverage5
+ordering, finite-value coverage checks, and provenance hashes. It does not resize
+or index-interpolate the 32,492-value surface files. These safeguards are retained
+so installation can be validated later; they do not make the missing maps available.
+
 Even after those checks, pattern-expression values are not emotion probabilities
 or observed viewer responses. Preserve CANlab/upstream research and licensing
 terms and keep this branch distinct from direct-media TSAM output.
 
 Source: [CANlab's pattern description](https://github.com/canlab/Neuroimaging_Pattern_Masks/blob/master/Multivariate_signature_patterns/2015_Kragel_emotionClassificationBPLS/contents_description.md).
 The local path is an install target, not present-asset evidence.
+
+## Response contract and temporal targets
+
+`response-ensemble/v1` preserves the fixed 0.55 TSAM / 0.45 Kragel profile. A source
+that is unavailable is omitted and the remaining source is renormalized per supported
+dimension; missing Kragel contempt/disgust signatures remain missing, not numeric zero.
+Malformed labels, logits, trajectories, weights or non-finite values fail closed before
+scoring. `response-target-distance/v1` is explicitly versioned and reports source
+disagreement and provenance separately from the raw evidence.
+
+Every active source carries model/checkpoint/preprocessing/geometry/projection metadata,
+and the ensemble carries its own version and specification hash. Temporal rows use a
+source-duration-normalized `[0,1]` axis. Target specs support the legacy whole-creative
+emotion map, one normalized `time_window`, or multiple normalized `windows`. Scoring
+uses only intervals overlapping the requested window, duration-weights overlaps, and
+omits uncovered tails; it never substitutes whole-creative or another-segment values.
