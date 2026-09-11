@@ -1,18 +1,19 @@
 """Durable single-GPU executor with checkpoints, cache, bounded search and recovery."""
 from __future__ import annotations
-import hashlib, json, logging, os, threading, time, traceback, subprocess, sys
-from datetime import datetime,timezone,timedelta
+import hashlib, json, logging, math, os, threading, time, subprocess, sys
+from datetime import datetime,timezone
 from pathlib import Path
 import numpy as np
 from filelock import FileLock,Timeout
-from sqlalchemy import select,update
+from sqlalchemy import select
 from .config import settings
-from .db import Session,Asset,Run,Evaluation,Experiment,RunEvent,initialize,now,uid,emit
+from .db import Session,Asset,Run,Evaluation,Experiment,initialize,now,uid,emit
 from . import inference,media,policy
 from .readout import compare_references,METRIC
 from .response import target_score as response_target_score
 from .services import register_asset
 from .integrations import planner_proposal,record_evidence
+from .strategy import CreativeStrategist,InterventionProposal,operator_implementation
 from .telemetry import traced
 
 log=logging.getLogger(__name__)
@@ -83,18 +84,24 @@ def get_asset(identity: str) -> Asset:
 def load_prediction(item: Evaluation) -> np.ndarray:
     return np.load(item.prediction_path,allow_pickle=False,mmap_mode='r')
 
-def render_candidate(run_id: str,original: Asset,best: Asset,best_eval: Evaluation,operator: str,experiment_id: str) -> Asset:
+def render_candidate(run_id: str,original: Asset,best: Asset,best_eval: Evaluation,operator: str | InterventionProposal,experiment_id: str) -> Asset:
+    if isinstance(operator,InterventionProposal):
+        proposal=operator
+        operator=proposal.operator
+    else:
+        operator=str(operator)
+    implementation=operator_implementation(operator)
     stage(run_id,'Rendering a controlled counterfactual')
     destination=settings().data/'renders'/f'{experiment_id}.mp4'
     config=dict(best.details.get('composition') or {})
     chain=list(best.details.get('edit_chain') or [])
     with Session() as db:
         locked=db.get(Run,run_id).config['project_snapshot']['constraints']
-    if not operator.startswith('headline_') and len(chain)>=int(locked.get('max_filter_edits',2)):
+    if implementation.renderer=='ffmpeg_filter' and len(chain)>=int(locked.get('max_filter_edits',2)):
         raise ValueError('Bounded filter-edit limit reached; refusing cumulative proxy exploitation')
     if config:
-        if operator.startswith('headline_'):
-            delta=-0.75 if operator=='headline_early' else 0.75
+        if implementation.renderer=='composition_timing':
+            delta=float(implementation.delta_seconds or 0)
             config['headline_start']=max(0,min(config['duration']-0.5,config['headline_start']+delta))
             if config['headline_start']==best.details['composition']['headline_start']: raise ValueError('Timing edit has no valid change remaining')
         else: chain.append(operator)
@@ -103,7 +110,7 @@ def render_candidate(run_id: str,original: Asset,best: Asset,best_eval: Evaluati
         media.compose(Path(source.path),render_target,config)
         source_path=render_target
     else:
-        if operator.startswith('headline_'): raise ValueError('Headline timing requires an editable composition; a flattened video has no independent text layer')
+        if implementation.renderer=='composition_timing': raise ValueError('Headline timing requires an editable composition; a flattened video has no independent text layer')
         chain.append(operator)
         source_path=Path(original.path)
         if original.kind=='image':
@@ -125,6 +132,116 @@ def render_candidate(run_id: str,original: Asset,best: Asset,best_eval: Evaluati
 
 def set_result(identity: str,result: dict) -> None:
     with Session.begin() as db: db.get(Run,identity).result=result
+
+
+def _proposal_from_experiment(
+    experiment: Experiment,
+    strategist: CreativeStrategist,
+    target: dict | None,
+    response_report: dict | None,
+    timeline: dict,
+    prior: list[Experiment],
+    constraints: dict,
+) -> InterventionProposal:
+    """Load a typed pending proposal, with a compatibility path for old rows."""
+
+    specification = experiment.specification if isinstance(experiment.specification,dict) else {}
+    try:
+        return InterventionProposal.model_validate({key:value for key,value in specification.items() if key not in {'lineage','parent_id','sibling_ids','siblings'}})
+    except Exception:
+        # Rows written before the typed contract can still be resumed, but the
+        # worker reconstructs them through the deterministic local backend.
+        proposal = strategist.propose(
+            target,
+            response_report,
+            timeline,
+            prior,
+            constraints,
+            allowed_operators=[experiment.operator],
+            seed=experiment.id,
+            lineage_id=str(specification.get("lineage_id") or f"legacy:{experiment.id}"),
+            parent_experiment_id=specification.get("parent_experiment_id"),
+        )
+        if proposal is None:
+            raise StopRun("Saved intervention proposal is no longer permitted")
+        if experiment.hypothesis and experiment.hypothesis != proposal.hypothesis:
+            proposal = proposal.model_copy(update={"hypothesis": experiment.hypothesis})
+        return proposal
+
+
+def _create_experiment_batch(
+    run_id: str,
+    proposals: list[InterventionProposal],
+    baseline_score: float,
+    sequence: int,
+) -> tuple[list[Experiment], int]:
+    """Persist one A/B/C sibling group before any candidate is rendered."""
+
+    rows: list[Experiment] = []
+    next_sequence = sequence
+    for proposal in proposals:
+        next_sequence += 1
+        rows.append(
+            Experiment(
+                id=uid(),
+                run_id=run_id,
+                sequence=next_sequence,
+                operator=proposal.operator,
+                hypothesis=proposal.hypothesis,
+                specification=proposal.as_dict(),
+                baseline_score=baseline_score,
+            )
+        )
+    sibling_ids = [row.id for row in rows]
+    with Session.begin() as db:
+        db.add_all(rows)
+        db.flush()
+        for row, proposal in zip(rows, proposals):
+            specification = dict(row.specification)
+            specification.update(
+                {
+                    "lineage_id": proposal.lineage_id,
+                    "lineage": proposal.lineage_id,
+                    "parent_experiment_id": proposal.parent_experiment_id,
+                    "parent_id": proposal.parent_experiment_id,
+                    "sibling_ids": sibling_ids,
+                    "siblings": sibling_ids,
+                    "branch": proposal.branch,
+                }
+            )
+            row.specification = specification
+    return rows, next_sequence
+
+
+def _mark_invalid_experiment(identity: str, experiment_id: str, reason: str, error_type: str) -> None:
+    with Session.begin() as db:
+        row = db.get(Experiment, experiment_id)
+        if row:
+            row.decision = "invalid"
+            row.evidence = {
+                "valid": False,
+                "reason": reason,
+                "exception_type": error_type,
+                "policy_update": "omitted_invalid_candidate",
+            }
+    emit(
+        identity,
+        "rejected_invalid",
+        "Candidate was not scoreable; the previous best and contextual policy were preserved.",
+        experiment_id=experiment_id,
+        reason=reason,
+        exception_type=error_type,
+    )
+
+
+def _timeline_for_evaluation(evaluation_item: Evaluation) -> dict:
+    evidence = evaluation_item.evidence or {}
+    return {
+        "source_duration": evidence.get("source_duration"),
+        "times": evidence.get("times") or [],
+        "segment_durations": evidence.get("segment_durations") or [],
+        "time_axis": (evidence.get("response_ensemble") or {}).get("time_axis"),
+    }
 
 @traced('neuroloop.run')
 def execute_run(identity: str) -> None:
@@ -159,81 +276,149 @@ def execute_run(identity: str) -> None:
     if run.mode!='optimize':
         raise StopRun('Analysis complete' if run.mode=='analyze' else 'Reference comparison complete')
     if not baseline_metric: raise ValueError('Optimization objective produced no scoreable evidence')
-    best=original; best_eval=baseline; best_score=baseline_metric['value']
-    context_data={'metric':metric_name,'min_gain':config['min_gain'],'operators':sorted(config['operators']),'profile':baseline.profile,'reference_hashes':[get_asset(x).sha256 for x in active_reference_ids],'target':config.get('target'),'kind':original.kind,'constraints':project['constraints'],'brief':project['brief']}
-    context=hashlib.sha256(json.dumps(context_data,sort_keys=True).encode()).hexdigest()[:32]
-    with Session() as db: prior=db.scalars(select(Experiment).where(Experiment.run_id==identity).order_by(Experiment.sequence)).all()
-    excluded={x.operator for x in prior};sequence=max([x.sequence for x in prior],default=0);rejections=0
-    pending=[x for x in prior if x.decision=='proposed']
-    for x in prior:
-        if x.decision=='kept': rejections=0
-        elif x.decision in {'invalid','reverted','tradeoff'}: rejections+=1
-    for previous in prior:
-        if previous.decision=='kept' and previous.asset_id:
-            best=get_asset(previous.asset_id)
-            with Session() as db: best_eval=db.get(Evaluation,previous.evidence['evaluation_id'])
-            best_score=previous.candidate_score
+    best=original; best_eval=baseline; best_score=float(baseline_metric['value']); best_experiment_id=None
+    baseline_report=baseline.evidence.get('response_ensemble')
+    timeline=_timeline_for_evaluation(baseline)
+    context_data={
+        'metric':metric_name,
+        'min_gain':config['min_gain'],
+        'operators':sorted(config['operators']),
+        'profile':baseline.profile,
+        'reference_hashes':[get_asset(x).sha256 for x in active_reference_ids],
+        'target':config.get('target'),
+        'response_report':baseline_report,
+        'timeline':timeline,
+        'kind':original.kind,
+        'constraints':project['constraints'],
+        'brief':project['brief'],
+    }
+    context=policy.context_id(context_data)
+    with Session() as db:
+        prior=db.scalars(select(Experiment).where(Experiment.run_id==identity).order_by(Experiment.sequence)).all()
+    sequence=max([x.sequence for x in prior],default=0)
+    rejections=0
+    lineage_decisions: dict[str, list[str]] = {}
+    for row in prior:
+        if row.decision=='kept' and row.asset_id and row.candidate_score is not None:
+            if float(row.candidate_score)>=best_score:
+                candidate_asset=get_asset(row.asset_id)
+                with Session() as db: best_eval=db.get(Evaluation,row.evidence.get('evaluation_id'))
+                if best_eval is not None:
+                    best=candidate_asset
+                    best_score=float(row.candidate_score);best_experiment_id=row.id
+        if row.decision in {'kept','invalid','reverted','tradeoff'}:
+            specification=row.specification if isinstance(row.specification,dict) else {}
+            lineage=str(specification.get('lineage_id') or f'legacy:{row.id}')
+            lineage_decisions.setdefault(lineage,[]).append(row.decision)
+    for decisions in lineage_decisions.values():
+        rejections=0 if 'kept' in decisions else rejections+1
     result['best_asset_id']=best.id;result['best_evaluation_id']=best_eval.id
     if best.id!=original.id:
         result['best_metric']=measured_metric(best_eval)
         if best_eval.evidence.get('response_ensemble'): result['best_response']=best_eval.evidence['response_ensemble']
+    result['policy_context']=context
+    result['strategy_backend']=CreativeStrategist.backend_identity
     set_result(identity,result)
     allowed=list(config['operators'])
     if not original.details.get('composition'): allowed=[x for x in allowed if not x.startswith('headline_')]
+    strategist=CreativeStrategist()
+    current_report=best_eval.evidence.get('response_ensemble') if best_eval else baseline_report
     while True:
         run=checkpoint(identity)
         if best_score>=config['target_score']: raise StopRun('Declared response target reached' if response_objective else 'Declared reference target reached')
-        if run.evaluations_used>=run.max_evaluations and not pending: raise StopRun('Evaluation budget exhausted; retained best validated candidate')
+        remaining=run.max_evaluations-run.evaluations_used
+        if remaining<=0: raise StopRun('Evaluation budget exhausted; retained best validated candidate')
         if rejections>=2:
             emit(identity,'meta_stop','Plateau detected under the fixed acceptance contract. No more renders are justified.',consecutive_rejections=rejections,policy='bounded-plateau/v1')
             raise StopRun('Two consecutive edits failed the minimum gain; stopped rather than generating indefinitely')
+
+        pending=[row for row in prior if row.decision=='proposed']
         if pending:
-            exp=pending.pop(0);operator=exp.operator;proposal=exp.specification
-            emit(identity,'resumed_experiment','Resuming the same experiment; saved render and inference are reused.',experiment_id=exp.id)
+            # Resume one saved sibling lineage at a time.  An interrupted run
+            # can therefore finish its already-reserved branch without making
+            # a new proposal or changing the immutable parent.
+            lineage=(pending[0].specification or {}).get('lineage_id') if isinstance(pending[0].specification,dict) else None
+            pending=[row for row in pending if ((row.specification or {}).get('lineage_id') if isinstance(row.specification,dict) else None)==lineage]
+            batch_rows=pending[:min(3,int(remaining))]
+            proposals=[_proposal_from_experiment(row,strategist,config.get('target') if response_objective else None,current_report,timeline,prior,project['constraints']) for row in batch_rows]
+            emit(identity,'resumed_experiment','Resuming the saved sibling lineage; saved renders and evaluations are reused.',lineage_id=lineage,sibling_count=len(batch_rows))
         else:
-            proposal=policy.choose(context,allowed,excluded,f'{identity}:{sequence}')
-            if proposal is None: raise StopRun('No untested permitted operators remain')
-            if sequence==0:
-                try:
-                    suggested=planner_proposal(project['brief'],[x for x in allowed if x not in excluded],{'baseline_metric':baseline_metric,'response_target':config.get('target'),'remaining_evaluations':run.max_evaluations-run.evaluations_used})
-                    if suggested: proposal.update(suggested);result['planner']=suggested['source']
-                except Exception as exc:
-                    emit(identity,'planner_unavailable','Planner unavailable; using the disclosed adaptive search policy.',error=type(exc).__name__)
-            operator=proposal['operator'];excluded.add(operator);sequence+=1
-            exp=Experiment(id=uid(),run_id=identity,sequence=sequence,operator=operator,hypothesis=proposal['hypothesis'],specification=proposal,baseline_score=best_score)
-            with Session.begin() as db: db.add(exp)
-            emit(identity,'hypothesis',proposal['hypothesis'],operator=operator,experiment_id=exp.id,policy=proposal['source'])
-        beginning=time.monotonic()
-        try:
-            candidate=get_asset(exp.asset_id) if exp.asset_id else render_candidate(identity,original,best,best_eval,operator,exp.id)
-        except (ValueError,media.MediaError) as exc:
+            branch_limit=min(policy.MAX_BRANCHES,int(remaining))
+            choices=policy.choose_batch(context,allowed,{row.operator for row in prior},f'{identity}:{sequence}',limit=branch_limit)
+            if not choices: raise StopRun('No untested permitted operators remain')
+            policy_operators=[choice['operator'] for choice in choices]
+            proposals=strategist.propose_candidates(
+                config.get('target') if response_objective else None,
+                current_report,
+                timeline,
+                prior,
+                project['constraints'],
+                allowed_operators=policy_operators,
+                max_candidates=branch_limit,
+                seed=f'{identity}:{sequence}',
+                lineage_id=f'{identity}:lineage:{sequence+1}',
+                parent_experiment_id=best_experiment_id,
+            )
+            if not proposals: raise StopRun('No deterministic intervention proposals remain')
+            batch_rows,sequence=_create_experiment_batch(identity,proposals,best_score,sequence)
+            prior.extend(batch_rows)
+            for choice,proposal,row in zip(choices,proposals,batch_rows):
+                emit(identity,'hypothesis',proposal.hypothesis,operator=proposal.operator,experiment_id=row.id,lineage_id=proposal.lineage_id,branch=proposal.branch,policy=choice['source'])
+
+        outcomes=[]
+        for row,proposal in zip(batch_rows,proposals):
+            beginning=time.monotonic()
+            try:
+                candidate=get_asset(row.asset_id) if row.asset_id else render_candidate(identity,original,best,best_eval,proposal,row.id)
+                with Session.begin() as db:
+                    saved=db.get(Experiment,row.id)
+                    if saved: saved.asset_id=candidate.id
+                candidate_eval=evaluation(identity,candidate,config)
+                if candidate_eval.profile!=baseline.profile:
+                    raise RuntimeError('Evaluator changed during the run; refusing mixed-profile comparison')
+                metric=measured_metric(candidate_eval)
+                if not metric or not math.isfinite(float(metric.get('value'))):
+                    raise ValueError('Candidate did not produce finite scoreable objective evidence')
+                gain=float(metric['value'])-best_score
+                worst_delta=None
+                if not response_objective:
+                    old=measured_metric(best_eval)
+                    if not old or not old.get('per_reference') or not metric.get('per_reference'):
+                        raise ValueError('Candidate/reference evidence is incomplete')
+                    worst_delta=min(a['value']-b['value'] for a,b in zip(metric['per_reference'],old['per_reference']))
+                outcomes.append({'row':row,'proposal':proposal,'candidate':candidate,'evaluation':candidate_eval,'metric':metric,'gain':gain,'worst_delta':worst_delta,'seconds':time.monotonic()-beginning,'valid':True})
+            except StopRun:
+                raise
+            except Exception as exc:
+                if isinstance(exc,RuntimeError) and str(exc).startswith('Evaluator changed during the run'):
+                    raise
+                _mark_invalid_experiment(identity,row.id,str(exc),type(exc).__name__)
+                outcomes.append({'row':row,'proposal':proposal,'valid':False,'seconds':time.monotonic()-beginning,'error':str(exc)})
+
+        valid=[outcome for outcome in outcomes if outcome['valid']]
+        eligible=[outcome for outcome in valid if outcome['gain']>=config['min_gain'] and not (outcome['worst_delta'] is not None and outcome['worst_delta'] < -config['min_gain'])]
+        winner=max(eligible,key=lambda outcome: (outcome['metric']['value'],outcome['proposal'].branch),default=None)
+        for outcome in valid:
+            outcome['decision']='kept' if winner is outcome else ('tradeoff' if outcome['worst_delta'] is not None and outcome['worst_delta'] < -config['min_gain'] else 'reverted')
+            row=outcome['row'];candidate_eval=outcome['evaluation'];metric=outcome['metric'];gain=outcome['gain']
+            evidence={'valid':True,'evaluation_id':candidate_eval.id,'metric':metric,'gain':gain,'worst_reference_delta':outcome['worst_delta'],'constraint_checks':{'duration_preserved':True},'reference_tradeoff':outcome['decision']=='tradeoff','selection':'winner' if winner is outcome else 'rejected_sibling','lineage_id':outcome['proposal'].lineage_id,'lineage':outcome['proposal'].lineage_id,'sibling_ids':(row.specification or {}).get('sibling_ids',[]),'siblings':(row.specification or {}).get('sibling_ids',[]),'response_ensemble':candidate_eval.evidence.get('response_ensemble')}
             with Session.begin() as db:
-                row=db.get(Experiment,exp.id);row.decision='invalid';row.evidence={'reason':str(exc)}
-            emit(identity,'rejected_invalid','Counterfactual failed a rendering or contract check; no preference update was made.',reason=str(exc))
-            rejections+=1;continue
-        with Session.begin() as db: db.get(Experiment,exp.id).asset_id=candidate.id
-        candidate_eval=evaluation(identity,candidate,config)
-        if candidate_eval.profile!=baseline.profile: raise RuntimeError('Evaluator changed during the run; refusing mixed-profile comparison')
-        metric=measured_metric(candidate_eval)
-        if not metric: raise ValueError('Candidate did not produce scoreable objective evidence')
-        gain=metric['value']-best_score
-        keep=gain>=config['min_gain'];decision='kept' if keep else 'reverted';worst_delta=None
-        if not response_objective:
-            old=measured_metric(best_eval)
-            worst_delta=min(a['value']-b['value'] for a,b in zip(metric['per_reference'],old['per_reference']))
-            if worst_delta < -config['min_gain']: keep=False;decision='tradeoff'
-        with Session.begin() as db:
-            row=db.get(Experiment,exp.id);row.candidate_score=metric['value'];row.decision=decision
-            row.evidence={'evaluation_id':candidate_eval.id,'metric':metric,'gain':gain,'worst_reference_delta':worst_delta,'constraint_checks':{'duration_preserved':True},'reference_tradeoff':decision=='tradeoff','response_ensemble':candidate_eval.evidence.get('response_ensemble')}
-            policy.record_in_session(db,context,operator,gain if keep else min(gain,0.0),time.monotonic()-beginning,config['min_gain'])
-        if keep:
-            best=candidate;best_eval=candidate_eval;best_score=metric['value'];rejections=0
-            result.update(best_asset_id=best.id,best_evaluation_id=best_eval.id,best_metric=metric)
-            if candidate_eval.evidence.get('response_ensemble'): result['best_response']=candidate_eval.evidence['response_ensemble']
-        else: rejections+=1
-        result['experiments_completed']=sequence;set_result(identity,result)
-        emit(identity,decision,'Accepted the measured improvement.' if keep else 'Retained the previous candidate; the fixed acceptance rule was not met.',experiment_id=exp.id,gain=gain)
-        record_evidence(identity,exp.id,{'gain':gain,'decision':decision,'metric':metric_name,'evaluation_id':candidate_eval.id})
+                saved=db.get(Experiment,row.id)
+                saved.candidate_score=float(metric['value']);saved.decision=outcome['decision'];saved.evidence=evidence
+                policy.record_valid_in_session(db,context,outcome['proposal'].operator,gain,outcome['seconds'],config['min_gain'],decision=outcome['decision'],valid=True)
+            emit(identity,outcome['decision'],'Accepted the best measured sibling.' if winner is outcome else 'Retained the previous candidate; this valid sibling was not the batch winner.',experiment_id=row.id,lineage_id=outcome['proposal'].lineage_id,branch=outcome['proposal'].branch,gain=gain)
+            record_evidence(identity,row.id,{'gain':gain,'decision':outcome['decision'],'metric':metric_name,'evaluation_id':candidate_eval.id,'lineage_id':outcome['proposal'].lineage_id})
+
+        if winner is not None:
+            best=winner['candidate'];best_eval=winner['evaluation'];best_score=float(winner['metric']['value']);best_experiment_id=winner['row'].id;rejections=0
+            current_report=best_eval.evidence.get('response_ensemble') or current_report
+            result.update(best_asset_id=best.id,best_evaluation_id=best_eval.id,best_metric=winner['metric'])
+            if best_eval.evidence.get('response_ensemble'): result['best_response']=best_eval.evidence['response_ensemble']
+        else:
+            rejections+=1
+        result['experiments_completed']=sequence;result['last_lineage_id']=proposals[0].lineage_id if proposals else None;set_result(identity,result)
+        with Session() as db:
+            prior=db.scalars(select(Experiment).where(Experiment.run_id==identity).order_by(Experiment.sequence)).all()
 
 
 def heartbeat(identity: str,done: threading.Event) -> None:
