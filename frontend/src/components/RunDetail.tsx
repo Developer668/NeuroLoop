@@ -90,6 +90,8 @@ export default function RunDetail({
   const experiments = run.experiments || [],
     measured = experiments.filter((e) => typeof e.candidate_score === "number");
   const baseline = run.result.baseline_metric?.value;
+  const responseObjective = run.result.metric === "response-target-distance/v1";
+  const scoreLabel = responseObjective ? "Response target match" : "Reference similarity";
   const values =
     typeof baseline === "number"
       ? [baseline, ...measured.map((e) => e.candidate_score!)]
@@ -166,9 +168,7 @@ export default function RunDetail({
                     <AssetVisual asset={original} play />
                     <span className="big-number">{score(baseline)}</span>
                     <span className="label-help">
-                      {baseline === undefined
-                        ? "No reference selected"
-                        : "Reference similarity"}
+                      {baseline === undefined ? "Analysis only" : scoreLabel}
                     </span>
                     <p>{original?.name}</p>
                   </div>
@@ -179,9 +179,7 @@ export default function RunDetail({
                       {score(run.result.best_metric?.value)}
                     </span>
                     <span className="label-help">
-                      {baseline === undefined
-                        ? "Analysis only"
-                        : "Reference similarity"}
+                      {baseline === undefined ? "Analysis only" : scoreLabel}
                     </span>
                     <p>{best?.name}</p>
                   </div>
@@ -191,7 +189,9 @@ export default function RunDetail({
                   <span>
                     {run.result.best_asset_id === run.result.baseline_asset_id
                       ? "The original remains the selected artifact."
-                      : "Selected under the fixed acceptance rule, with reference trade-offs checked."}
+                      : responseObjective
+                        ? "Selected under the fixed response-target acceptance rule."
+                        : "Selected under the fixed acceptance rule, with reference trade-offs checked."}
                   </span>
                   <button
                     className="link-text"
@@ -234,7 +234,7 @@ export default function RunDetail({
                   },
                 ]}
                 labels={["Original", ...measured.map((e) => "E" + e.sequence)]}
-                caption="Measured reference similarity by experiment"
+                caption={responseObjective ? "Measured response-target match by experiment" : "Measured reference similarity by experiment"}
               />
             </div>
           </Panel>

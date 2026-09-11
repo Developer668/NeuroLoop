@@ -40,7 +40,7 @@ The isolated runtime completed a new MCP-driven silent NASA composition evaluati
 
 The post-crash audit checked **29 saved arrays and 32 managed media files**: all array summaries, served first frames and asset hashes matched. **109 backend tests passed**, the frontend production build passed, and the recovery audit passed all 16 checks without neural execution. See [AUDIT.md](docs/AUDIT.md) for evidence and limitations.
 
-Scores measure similarity between predicted cortical patterns. They do not establish emotion, liking, conversion or a particular person's response. Model weights remain frozen; only context-specific edit statistics adapt. Kragel and TSAM scientific validation are deferred to the user. Commercial permissions and quantization accuracy validation remain open.
+NeuroLoop now supports both predicted-cortical reference similarity and an experimental response-target loop. Response-target runs keep TSAM direct-media logits and TRIBE-derived Kragel pattern expression separate, combine them through an explicit versioned ensemble, and optimize controlled local interventions against a declared target. These are relative model-evidence scores, not measured emotions, liking, conversion, or a particular person's response. Model weights remain frozen; only context-specific intervention statistics adapt. Scientific transfer validation and quantization accuracy remain open.
 
 ## Folder map
 

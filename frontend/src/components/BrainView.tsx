@@ -4,7 +4,7 @@ import { Download, ChevronRight, Layers, Info } from "lucide-react";
 import dynamic from "next/dynamic";
 const BrainCanvas = dynamic(() => import("./BrainCanvas"), { ssr: false });
 import { Panel, Empty, AssetVisual, Badge, errorText, dateText } from "./UI";
-import { AnatomicalReadout, TSAMReadout } from "./BrainReadouts";
+import { AnatomicalReadout, TSAMReadout, KragelReadout, ResponseEnsembleReadout } from "./BrainReadouts";
 import { LineChart } from "./Charts";
 import { api, Asset, Evaluation, seconds, size } from "@/lib/types";
 
@@ -336,16 +336,9 @@ export default function BrainView({
               )}
             </div>
           </div>
+          {ev && <ResponseEnsembleReadout evidence={ev} />}
           {ev && <TSAMReadout evidence={ev} />}
-          <Panel title="Kragel signature alignment">
-            <div className="panel-body">
-              <Badge value="not_validated" />
-              <p className="status-detail" style={{ marginTop: 12 }}>
-                {ev?.emotion_decoder?.reason ||
-                  "The downloaded Kragel patterns require verified surface registration and validation on synthetic responses. No emotion values are invented."}
-              </p>
-            </div>
-          </Panel>
+          {ev && <KragelReadout evidence={ev} />}
         </aside>
       </div>
     </>

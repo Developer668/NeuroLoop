@@ -1,8 +1,8 @@
 """Strict, CPU-only adapter for the original TSAM inference implementation.
 
 The public checkpoint is a composite eight-class network, not a plain backbone.
-No missing layer is tolerated. Scores are uncalibrated class logits, separate
-from TRIBE and excluded from the optimization objective.
+No missing layer is tolerated. Scores are uncalibrated class logits and remain
+separate from TRIBE. Response-target runs may combine them only through the explicit, versioned ensemble.
 """
 from __future__ import annotations
 import contextlib
@@ -108,4 +108,4 @@ def predict_video(path: Path, duration: float, output: Path) -> dict:
             'interpretation': 'Uncalibrated eight-class logits. Not probabilities or observed viewer emotions.',
             'limitations': ['Upstream default inference configuration; original training configuration is not embedded in the checkpoint.',
                             'Strict loading verifies architecture compatibility, not predictive validity on your creative.',
-                            'Research-use licensing applies. Excluded from automatic keep/revert decisions.']}
+                            'Research-use licensing applies. When explicitly selected for response-target optimization, the versioned ensemble may use this relative evidence for keep/revert decisions.']}

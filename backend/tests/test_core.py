@@ -118,7 +118,7 @@ def test_unsupported_constraints_rejected(client,authed):
 
 def test_never_invent_missing_emotion_outputs(client,authed):
     data=client.get('/api/capabilities',headers=authed).json()
-    assert data['kragel']['status']=='blocked'
+    assert data['kragel']['status']=='missing_assets'
     assert data['tsam']['status']=='missing_weights'
     assert data['training'] is False
 

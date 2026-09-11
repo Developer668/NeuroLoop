@@ -13,10 +13,10 @@ Current execution is paused after repeated Windows 0x113 graphics crashes. Revie
 | Capability/documentation drift | Current hold, hardware and agent heartbeat checks; weight presence separated from inference proof | Keep statuses tied to new evidence when runtime/model versions change |
 | Quantization accuracy | Actual local quantized inference exists | Representative held-out original-versus-quantized comparison, per-modality metrics and acceptance thresholds |
 | Commercial permissions | Unresolved | Documented rights for intended use of upstream models, software and datasets; TRIBE/TSAM restrictions remain relevant |
-| Kragel registration/scoring | **User deferred.** Blocked readout remains blocked | Transforms, registration provenance, reference scoring and held-out transfer validation |
-| TSAM scientific validation | **User deferred.** Experimental CPU path; excluded from objective | Reproduction, class mapping, leakage checks, domain metrics and calibration |
+| Kragel registration/scoring | **Implemented experimentally.** Published MNI volumes are sampled through fsaverage5 white/pial geometry; pattern expression is persisted and shown separately | Independent measured-fMRI to synthetic-TRIBE transfer validation remains open |
+| TSAM integration | **Implemented experimentally.** Strict eight-class CPU checkpoint path and five-second audiovisual windows; can contribute to the explicit response ensemble | Scientific/domain validation and calibration remain open |
 | W&B Inference / web AI conversation | **User deferred.** No LLM request enabled | Later provider credentials/access, agreed sharing policy and constrained-planner acceptance; web chat needs its own actual conversational contract |
-| CoreWeave compute/storage | Deferred; local device only | Explicit cloud authorization, runtime/storage, budget and telemetry |
+| CoreWeave compute/storage | Awaiting sponsor credits/access; local device only | Explicit cloud authorization, runtime/storage, budget and live acceptance test |
 | TypeSafe | Deferred; no runtime call | Agreed provider contract and implementation |
 | Public product | Not requested | Tenant isolation, identity, quotas, HTTPS and adversarial review before public use |
 

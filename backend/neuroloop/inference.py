@@ -151,7 +151,7 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
     times=[float(x.start) for x in segments]
     atomic_json(output/'segments.json',[{'start':float(x.start),'duration':float(x.duration)} for x in segments])
     evidence=summarize(predictions,times)
-    evidence.update({'evaluator':'TRIBE v2','profile':profile_id(),'kind':'model_predicted_cortical_response','device':device,'segment_durations':[float(x.duration) for x in segments],'source_duration':duration,'modalities':sorted(events.type.unique().tolist()),'transcript_source':transcript_source,'transcript_words':len(words),'input_adaptation':adaptation,'seconds':time.monotonic()-started,'peak_cuda_bytes':torch.cuda.max_memory_allocated() if device == 'cuda' else None,'time_note':'Official segment timestamps retained. TRIBE handles the hemodynamic offset; no extra time shift is applied.','quantization':'Original TRIBE brain checkpoint; locally quantized INT8 video and NF4 base text encoders.','limitations':['Predicted average cortical response, not an individual brain scan.','Not purchase intent, CTR, thoughts, or a calibrated emotion probability.','Quantized end-to-end neuroscience accuracy has not been established.'],'emotion_decoder':{'status':'blocked','reason':'Kragel surface registration and synthetic-to-measured transfer are not validated.'}})
+    evidence.update({'evaluator':'TRIBE v2','profile':profile_id(),'kind':'model_predicted_cortical_response','device':device,'segment_durations':[float(x.duration) for x in segments],'source_duration':duration,'modalities':sorted(events.type.unique().tolist()),'transcript_source':transcript_source,'transcript_words':len(words),'input_adaptation':adaptation,'seconds':time.monotonic()-started,'peak_cuda_bytes':torch.cuda.max_memory_allocated() if device == 'cuda' else None,'time_note':'Official segment timestamps retained. TRIBE handles the hemodynamic offset; no extra time shift is applied.','quantization':'Original TRIBE brain checkpoint; locally quantized INT8 video and NF4 base text encoders.','limitations':['Predicted average cortical response, not an individual brain scan.','Not purchase intent, CTR, thoughts, or a calibrated emotion probability.','Quantized end-to-end neuroscience accuracy has not been established.'],'emotion_decoder':{'status':'experimental' if config.get('include_kragel') else 'not_requested','reason':'Kragel pattern expression is model-to-model experimental evidence, not calibrated human emotion.'}})
     evidence['hardware_preflight']=preflight
     if config.get('include_tsam'):
         if not config.get('tsam_research_acknowledged'):
@@ -165,6 +165,16 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
                 evidence['tsam']={'status':'failed','reason':str(exc)[:500]}
         else:
             evidence['tsam']={'status':'not_applicable','reason':'Requires an original video with audio.'}
-        evidence['seconds']=time.monotonic()-started
+    if config.get('include_kragel'):
+        on_progress('Computing experimental Kragel emotion-pattern expression')
+        try:
+            from .kragel import decode
+            evidence['kragel']=decode(predictions,times)
+        except Exception as exc:
+            evidence['kragel']={'status':'failed','reason':str(exc)[:500]}
+    if evidence.get('tsam') or evidence.get('kragel'):
+        from .response import ensemble
+        evidence['response_ensemble']=ensemble(evidence)
+    evidence['seconds']=time.monotonic()-started
     atomic_json(output/'evidence.json',evidence)
     return evidence

@@ -81,10 +81,13 @@ power settings were changed. Serialized inference, RAM/GPU headroom checks,
 CPU offloading and process isolation reduce software pressure; they cannot
 promise graphics-driver stability for arbitrary workloads.
 
-TSAM is technically working, experimental and uncalibrated; it remains excluded
-from keep/revert scoring. Kragel needs verified spatial registration, scoring and
-transfer validity. Weave and W&B Inference lack credentials; ARIA needs Launch
-setup. CoreWeave cloud compute is deferred and TypeSafe is disabled as requested.
+TSAM is technically working, experimental and uncalibrated. Kragel now has a
+documented MNI-volume-to-fsaverage5 projection and experimental scoring path. In
+response-target runs these sources can contribute through the explicit versioned
+ensemble; this establishes software integration, not human-response validity. Transfer
+validation remains open. W&B and sponsor connection status is reported from the live
+deployment rather than inferred from sponsor presence. CoreWeave generation/compute
+remains deferred until access is actually configured.
 
 Codex's `neuroloop` MCP entry is configured. The exact command passed SDK checks;
 reload MCP connections or reopen Codex to expose it in a new conversation. This

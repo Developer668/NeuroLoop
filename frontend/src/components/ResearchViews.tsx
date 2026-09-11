@@ -557,7 +557,7 @@ export function SettingsView({ data }: { data: Dashboard }) {
             <div className="data-row">
               <div className="row-copy">
                 <strong>Kragel brain signatures</strong>
-                <small>{c.kragel.reason}</small>
+                <small>{c.kragel.reason || c.kragel.meaning}</small>
               </div>
               <Badge value={c.kragel.status} />
             </div>
@@ -570,6 +570,21 @@ export function SettingsView({ data }: { data: Dashboard }) {
         </Panel>
       </div>
       <HardwarePanel />
+      {c.generation_providers?.length ? (
+        <Panel title="Creative generation providers" description="These are honest capability states. Sponsor-gated providers are not called until access is configured.">
+          <div className="panel-body model-list">
+            {c.generation_providers.map((provider) => (
+              <div key={provider.name} className="data-row">
+                <div className="row-copy">
+                  <strong>{provider.name}</strong>
+                  <small>{provider.detail}</small>
+                </div>
+                <Badge value={provider.status} />
+              </div>
+            ))}
+          </div>
+        </Panel>
+      ) : null}
       <Panel
         title="Integration status"
         description="Status reflects this deployment, not a sponsor logo."

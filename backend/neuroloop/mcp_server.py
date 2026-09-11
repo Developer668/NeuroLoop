@@ -25,14 +25,21 @@ def create_project(name: str,brief: str='',asset_id: str | None=None,reference_i
     return services.create_project(ProjectCreate(name=name,brief=brief,asset_id=asset_id,reference_ids=reference_ids or []))
 
 @mcp.tool()
-def evaluate_creative(project_id: str,max_evaluations: int=4,no_speech: bool=False,allow_static_presentation: bool=False,idempotency_key: str | None=None,include_tsam:bool=False,tsam_research_acknowledged:bool=False) -> dict:
-    """Queue real neural evaluation. No speech may only be asserted for media without spoken language."""
-    return services.create_run(RunCreate(project_id=project_id,max_evaluations=max_evaluations,no_speech=no_speech,allow_static_presentation=allow_static_presentation,include_tsam=include_tsam,tsam_research_acknowledged=tsam_research_acknowledged),idempotency_key)
+def evaluate_creative(project_id: str,max_evaluations: int=4,no_speech: bool=False,allow_static_presentation: bool=False,idempotency_key: str | None=None,include_tsam:bool=False,tsam_research_acknowledged:bool=False,include_kragel:bool=True) -> dict:
+    """Queue real TRIBE evaluation with optional independent TSAM and experimental Kragel readouts."""
+    return services.create_run(RunCreate(project_id=project_id,max_evaluations=max_evaluations,no_speech=no_speech,allow_static_presentation=allow_static_presentation,include_tsam=include_tsam,tsam_research_acknowledged=tsam_research_acknowledged,include_kragel=include_kragel),idempotency_key)
 
 @mcp.tool()
 def optimize_creative(project_id: str,max_evaluations: int=4,max_seconds: int=1800,min_gain: float=0.005,no_speech: bool=False,allow_static_presentation: bool=False,idempotency_key: str | None=None) -> dict:
     """Run bounded controlled edits against supplied reference responses; returns immediately with a job ID."""
     return services.create_run(RunCreate(project_id=project_id,mode='optimize',max_evaluations=max_evaluations,max_seconds=max_seconds,min_gain=min_gain,no_speech=no_speech,allow_static_presentation=allow_static_presentation),idempotency_key)
+
+@mcp.tool()
+def optimize_response(project_id: str, emotion_targets: dict[str,float], max_evaluations: int=6, max_seconds: int=1800, min_gain: float=0.005, no_speech: bool=False, allow_static_presentation: bool=False, include_tsam: bool=False, tsam_research_acknowledged: bool=False, include_kragel: bool=True, idempotency_key: str | None=None) -> dict:
+    """Optimize local controlled edits toward declared relative emotion targets. Values are 0..1 model-evidence targets, not human-response probabilities."""
+    target={'emotions':{name:{'desired':value,'weight':1.0} for name,value in emotion_targets.items()}}
+    request=RunCreate(project_id=project_id,mode='optimize',objective='response_target',target=target,max_evaluations=max_evaluations,max_seconds=max_seconds,min_gain=min_gain,no_speech=no_speech,allow_static_presentation=allow_static_presentation,include_tsam=include_tsam,tsam_research_acknowledged=tsam_research_acknowledged,include_kragel=include_kragel)
+    return services.create_run(request,idempotency_key)
 
 @mcp.tool()
 def get_run(run_id: str) -> dict:

@@ -10,6 +10,7 @@ from .config import settings
 from .db import Session,Asset,Run,Evaluation,Experiment,RunEvent,initialize,now,uid,emit
 from . import inference,media,policy
 from .readout import compare_references,METRIC
+from .response import target_score as response_target_score
 from .services import register_asset
 from .integrations import planner_proposal,record_evidence
 from .telemetry import traced
@@ -42,7 +43,7 @@ def stage(identity: str,message: str) -> None:
 def evaluation(identity: str,asset: Asset,config: dict) -> Evaluation:
     run=checkpoint(identity)
     profile=inference.profile_id()
-    meaningful={k:config.get(k) for k in ['no_speech','transcript','allow_static_presentation','presentation_seconds','include_tsam']}
+    meaningful={k:config.get(k) for k in ['no_speech','transcript','allow_static_presentation','presentation_seconds','include_tsam','include_kragel']}
     meaningful['transcript']=config.get('transcript') or asset.details.get('transcript',[])
     meaningful['metric_schema']=METRIC
     key=hashlib.sha256(json.dumps({'asset':asset.sha256,'profile':profile,'preprocessing':meaningful},sort_keys=True).encode()).hexdigest()
@@ -132,23 +133,34 @@ def execute_run(identity: str) -> None:
     snapshots=run.config.get('asset_metadata_snapshots',{})
     if original.id in snapshots: original.details=snapshots[original.id]
     config={**config,'transcript':config.get('transcript') or original.details.get('transcript',[])}
+    response_objective=config.get('objective')=='response_target'
+    active_reference_ids=[] if response_objective else list(project['reference_ids'])
     references=[]; ref_evaluations=[]
-    for ref_id in project['reference_ids']:
+    for ref_id in active_reference_ids:
         ref=get_asset(ref_id)
         if ref.id in snapshots: ref.details=snapshots[ref.id]
         ref_config={**config,'transcript':ref.details.get('transcript',[])}
         item=evaluation(identity,ref,ref_config)
         references.append((ref_id,load_prediction(item)));ref_evaluations.append(item.id)
     baseline=evaluation(identity,original,config)
-    baseline_metric=compare_references(load_prediction(baseline),references) if references else None
-    result={'baseline_asset_id':original.id,'best_asset_id':original.id,'baseline_evaluation_id':baseline.id,'best_evaluation_id':baseline.id,'reference_evaluation_ids':ref_evaluations,'baseline_metric':baseline_metric,'best_metric':baseline_metric,'metric':METRIC,'scope':'Fixed predicted-neural-reference objective; not human preference or conversion.','policy':'context-scoped Thompson sampling','planner':'not used','generation_calls':0}
+
+    def measured_metric(item: Evaluation) -> dict | None:
+        if response_objective:
+            report=item.evidence.get('response_ensemble')
+            return response_target_score(report,config.get('target')) if report else None
+        return compare_references(load_prediction(item),references) if references else None
+
+    baseline_metric=measured_metric(baseline)
+    metric_name='response-target-distance/v1' if response_objective else METRIC
+    result={'baseline_asset_id':original.id,'best_asset_id':original.id,'baseline_evaluation_id':baseline.id,'best_evaluation_id':baseline.id,'reference_evaluation_ids':ref_evaluations,'baseline_metric':baseline_metric,'best_metric':baseline_metric,'metric':metric_name,'scope':'Experimental TSAM + Kragel response-target objective; relative model evidence, not measured human preference.' if response_objective else 'Fixed predicted-neural-reference objective; not human preference or conversion.','policy':'context-scoped cost-aware Thompson sampling','planner':'not used','generation_calls':0}
+    if baseline.evidence.get('response_ensemble'):
+        result['baseline_response']=baseline.evidence['response_ensemble'];result['best_response']=baseline.evidence['response_ensemble']
     set_result(identity,result)
     if run.mode!='optimize':
-        set_result(identity,result)
         raise StopRun('Analysis complete' if run.mode=='analyze' else 'Reference comparison complete')
-    if not baseline_metric: raise ValueError('Optimization requires reference evidence')
+    if not baseline_metric: raise ValueError('Optimization objective produced no scoreable evidence')
     best=original; best_eval=baseline; best_score=baseline_metric['value']
-    context_data={'metric':METRIC,'min_gain':config['min_gain'],'operators':sorted(config['operators']),'profile':baseline.profile,'reference_hashes':[get_asset(x).sha256 for x in project['reference_ids']],'kind':original.kind,'constraints':project['constraints'],'brief':project['brief']}
+    context_data={'metric':metric_name,'min_gain':config['min_gain'],'operators':sorted(config['operators']),'profile':baseline.profile,'reference_hashes':[get_asset(x).sha256 for x in active_reference_ids],'target':config.get('target'),'kind':original.kind,'constraints':project['constraints'],'brief':project['brief']}
     context=hashlib.sha256(json.dumps(context_data,sort_keys=True).encode()).hexdigest()[:32]
     with Session() as db: prior=db.scalars(select(Experiment).where(Experiment.run_id==identity).order_by(Experiment.sequence)).all()
     excluded={x.operator for x in prior};sequence=max([x.sequence for x in prior],default=0);rejections=0
@@ -156,20 +168,21 @@ def execute_run(identity: str) -> None:
     for x in prior:
         if x.decision=='kept': rejections=0
         elif x.decision in {'invalid','reverted','tradeoff'}: rejections+=1
-    # Resume the last committed accepted candidate, not a new optimization run.
     for previous in prior:
         if previous.decision=='kept' and previous.asset_id:
             best=get_asset(previous.asset_id)
             with Session() as db: best_eval=db.get(Evaluation,previous.evidence['evaluation_id'])
             best_score=previous.candidate_score
     result['best_asset_id']=best.id;result['best_evaluation_id']=best_eval.id
-    if best.id!=original.id: result['best_metric']=compare_references(load_prediction(best_eval),references)
+    if best.id!=original.id:
+        result['best_metric']=measured_metric(best_eval)
+        if best_eval.evidence.get('response_ensemble'): result['best_response']=best_eval.evidence['response_ensemble']
     set_result(identity,result)
     allowed=list(config['operators'])
     if not original.details.get('composition'): allowed=[x for x in allowed if not x.startswith('headline_')]
     while True:
         run=checkpoint(identity)
-        if best_score>=config['target_score']: raise StopRun('Declared reference target reached')
+        if best_score>=config['target_score']: raise StopRun('Declared response target reached' if response_objective else 'Declared reference target reached')
         if run.evaluations_used>=run.max_evaluations and not pending: raise StopRun('Evaluation budget exhausted; retained best validated candidate')
         if rejections>=2:
             emit(identity,'meta_stop','Plateau detected under the fixed acceptance contract. No more renders are justified.',consecutive_rejections=rejections,policy='bounded-plateau/v1')
@@ -182,7 +195,7 @@ def execute_run(identity: str) -> None:
             if proposal is None: raise StopRun('No untested permitted operators remain')
             if sequence==0:
                 try:
-                    suggested=planner_proposal(project['brief'],[x for x in allowed if x not in excluded],{'baseline_metric':baseline_metric,'remaining_evaluations':run.max_evaluations-run.evaluations_used})
+                    suggested=planner_proposal(project['brief'],[x for x in allowed if x not in excluded],{'baseline_metric':baseline_metric,'response_target':config.get('target'),'remaining_evaluations':run.max_evaluations-run.evaluations_used})
                     if suggested: proposal.update(suggested);result['planner']=suggested['source']
                 except Exception as exc:
                     emit(identity,'planner_unavailable','Planner unavailable; using the disclosed adaptive search policy.',error=type(exc).__name__)
@@ -201,23 +214,26 @@ def execute_run(identity: str) -> None:
         with Session.begin() as db: db.get(Experiment,exp.id).asset_id=candidate.id
         candidate_eval=evaluation(identity,candidate,config)
         if candidate_eval.profile!=baseline.profile: raise RuntimeError('Evaluator changed during the run; refusing mixed-profile comparison')
-        metric=compare_references(load_prediction(candidate_eval),references);gain=metric['value']-best_score
-        keep=gain>=config['min_gain'];decision='kept' if keep else 'reverted'
-        # Preserve reference tradeoffs: a gain on the mean cannot hide a large reference regression.
-        old=compare_references(load_prediction(best_eval),references)
-        worst_delta=min(a['value']-b['value'] for a,b in zip(metric['per_reference'],old['per_reference']))
-        if worst_delta < -config['min_gain']: keep=False;decision='tradeoff';
+        metric=measured_metric(candidate_eval)
+        if not metric: raise ValueError('Candidate did not produce scoreable objective evidence')
+        gain=metric['value']-best_score
+        keep=gain>=config['min_gain'];decision='kept' if keep else 'reverted';worst_delta=None
+        if not response_objective:
+            old=measured_metric(best_eval)
+            worst_delta=min(a['value']-b['value'] for a,b in zip(metric['per_reference'],old['per_reference']))
+            if worst_delta < -config['min_gain']: keep=False;decision='tradeoff'
         with Session.begin() as db:
             row=db.get(Experiment,exp.id);row.candidate_score=metric['value'];row.decision=decision
-            row.evidence={'evaluation_id':candidate_eval.id,'metric':metric,'gain':gain,'worst_reference_delta':worst_delta,'constraint_checks':{'duration_preserved':True},'reference_tradeoff':decision=='tradeoff'}
+            row.evidence={'evaluation_id':candidate_eval.id,'metric':metric,'gain':gain,'worst_reference_delta':worst_delta,'constraint_checks':{'duration_preserved':True},'reference_tradeoff':decision=='tradeoff','response_ensemble':candidate_eval.evidence.get('response_ensemble')}
             policy.record_in_session(db,context,operator,gain if keep else min(gain,0.0),time.monotonic()-beginning,config['min_gain'])
         if keep:
             best=candidate;best_eval=candidate_eval;best_score=metric['value'];rejections=0
             result.update(best_asset_id=best.id,best_evaluation_id=best_eval.id,best_metric=metric)
+            if candidate_eval.evidence.get('response_ensemble'): result['best_response']=candidate_eval.evidence['response_ensemble']
         else: rejections+=1
         result['experiments_completed']=sequence;set_result(identity,result)
         emit(identity,decision,'Accepted the measured improvement.' if keep else 'Retained the previous candidate; the fixed acceptance rule was not met.',experiment_id=exp.id,gain=gain)
-        record_evidence(identity,exp.id,{'gain':gain,'decision':decision,'metric':METRIC,'evaluation_id':candidate_eval.id})
+        record_evidence(identity,exp.id,{'gain':gain,'decision':decision,'metric':metric_name,'evaluation_id':candidate_eval.id})
 
 
 def heartbeat(identity: str,done: threading.Event) -> None:
