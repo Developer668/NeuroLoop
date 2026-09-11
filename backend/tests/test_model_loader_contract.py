@@ -69,6 +69,11 @@ class ModelLoaderContractTests(unittest.TestCase):
         ):
             self.assertIn(setting, self.local_source)
 
+    def test_feature_selection_is_passed_to_the_frozen_config(self):
+        self.assertIn("features_to_use=None", self.video_source)
+        self.assertIn("config_update['data.features_to_use'] = list(features_to_use)", self.video_source)
+        self.assertIn("features_to_use=features_to_use", self.local_source)
+
     def test_local_modalities_and_shared_grid_contracts_are_retained(self):
         self.assertIn("tribe.data.audio_feature.device = 'cpu'", self.local_source)
         self.assertIn("tribe.data.video_feature.image.device = device", self.local_source)
@@ -80,7 +85,7 @@ class ModelLoaderContractTests(unittest.TestCase):
             "backend='pread'",
             "feature batch size 1",
             "zero\ndata-loader workers",
-            "full hidden-state tuple",
+            "compact result",
             "guarded real-device measurement",
         ):
             self.assertIn(phrase, self.readme)

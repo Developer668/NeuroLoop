@@ -35,6 +35,30 @@ def _load_video_state_dict(path, device):
     return load_file(path, device='cpu'), False
 
 
+def _compact_hidden_states(hidden_states, layer_points=(0.75, 1.0)):
+    """Apply the shipped group-mean layer contract before host transfer.
+
+    V-JEPA returns all hidden layers, while the local TRIBE config consumes
+    the group bounded by normalized layers 0.75 and 1.0.  Averaging that group
+    in FP32 on the inference device avoids creating a second host-side FP32
+    copy of every intermediate layer.  The returned one-layer tuple is still
+    accepted by Neuralset's configured group-mean aggregation and produces the
+    same feature shape.
+    """
+    states = tuple(hidden_states or ())
+    if not states:
+        raise RuntimeError('V-JEPA returned no hidden states')
+    indices = sorted({int(point * (len(states) - 1)) for point in layer_points})
+    if len(indices) == 1:
+        return (states[indices[0]],)
+    start, stop = indices[0], indices[-1] + 1
+    mean = states[start].to(dtype=torch.float32)
+    for state in states[start + 1:stop]:
+        mean.add_(state.to(dtype=torch.float32))
+    mean.div_(stop - start)
+    return (mean,)
+
+
 def resolve_device(device='auto'):
     if device != 'auto':
         if device == 'cuda' and not torch.cuda.is_available():
@@ -88,12 +112,19 @@ def load_video_model(repo_dir=ROOT, device='auto'):
     processor = AutoVideoProcessor.from_pretrained(folder, local_files_only=True, trust_remote_code=False)
     return model, processor
 
-def load_quantized_tribev2(repo_dir=ROOT, device='auto', cache_folder=None):
+def load_quantized_tribev2(repo_dir=ROOT, device='auto', cache_folder=None, features_to_use=None):
     """Requires the official TRIBE package and its dependencies; lazy video injection."""
     from tribev2 import TribeModel
     from neuralset.extractors import video as video_module
     repo_dir = Path(repo_dir).resolve()
     device = resolve_device(device)
+    if features_to_use is not None:
+        features_to_use = tuple(features_to_use)
+        allowed = {'text', 'audio', 'video'}
+        if not features_to_use or any(feature not in allowed for feature in features_to_use):
+            raise ValueError('features_to_use must be a non-empty subset of text, audio, and video')
+        if len(set(features_to_use)) != len(features_to_use):
+            raise ValueError('features_to_use must not contain duplicates')
     cache_folder = str(cache_folder or repo_dir / 'cache-int8')
     # Convert the official Linux YAML tags without executing Python constructors.
     class SourceConfigLoader(yaml.SafeLoader):
@@ -136,19 +167,37 @@ def load_quantized_tribev2(repo_dir=ROOT, device='auto', cache_folder=None):
             # hidden states are copied to their required CPU representation.
             del inputs
             # Neuralset converts features to numpy, which does not support BF16.
-            # Pooling in Neuralset happens on CPU. Do not hold or concatenate all
-            # 41 FP32 token layers on the laptop GPU alongside text/audio models.
-            result.hidden_states = tuple(x.to(device='cpu', dtype=torch.float32) for x in result.hidden_states)
+            # The shipped config uses group_mean over the final 25% of layers;
+            # compact that group before transfer rather than materializing all
+            # 41 FP32 token layers on host memory alongside text/audio models.
+            compacted = _compact_hidden_states(result.hidden_states)
+            result.hidden_states = tuple(x.to(device='cpu', dtype=torch.float32) for x in compacted)
+            del compacted
+            # Neuralset consumes only ``hidden_states`` from this result. Drop
+            # transformer output fields that otherwise retain device tensors
+            # until the video event has finished pooling.
+            for attribute in ('last_hidden_state', 'masked_hidden_state', 'attentions', 'predictor_output'):
+                if hasattr(result, attribute):
+                    setattr(result, attribute, None)
             return result
 
     # Neuralset constructs video wrappers lazily during feature extraction.
     video_module._HFVideoModel = LocalVideoModel
+    config_update = {
+        'data.video_feature.frequency': 2.0,
+        'data.video_feature.image.batch_size': 1,
+        'data.batch_size': 1,
+        'data.num_workers': 0,
+    }
+    if features_to_use is not None:
+        # The brain checkpoint retains projectors for all trained feature keys,
+        # while Data only prepares the selected extractors. Missing modalities
+        # are zero-filled by the frozen TRIBE model, so this is a safe loading
+        # optimization rather than a checkpoint change.
+        config_update['data.features_to_use'] = list(features_to_use)
     tribe = TribeModel.from_pretrained(
         runtime, checkpoint_name='../best.ckpt', device=device, cache_folder=cache_folder,
-        config_update={'data.video_feature.frequency': 2.0,
-                       'data.video_feature.image.batch_size': 1,
-                       'data.batch_size': 1,
-                       'data.num_workers': 0})
+        config_update=config_update)
     # TRIBE concatenates modalities at identical time indices. Keep the official
     # 2 Hz shared grid; video-only 1.5 Hz produces 150 vs 200 samples per segment.
     return tribe

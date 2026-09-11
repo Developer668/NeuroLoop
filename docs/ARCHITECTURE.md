@@ -68,7 +68,8 @@ run events provide progress. All three web services bind to loopback.
 | `backend/neuroloop/services.py` | Validation, immutable run contracts, queue creation and workspace queries |
 | `backend/neuroloop/mcp_server.py`, `mcp_extensions.py` | Eighteen agent tools over those same services |
 | `backend/neuroloop/worker.py` | Job execution, references, cache, experiments, stopping and recovery |
-| `backend/neuroloop/inference.py` | Local preprocessing, evaluation subprocess and actual model prediction |
+| `backend/neuroloop/inference.py` | Local preprocessing, input-specific model loading, evaluation subprocess and actual model prediction |
+| `backend/neuroloop/modality.py` | Pure input-to-feature routing contract and reader-measurement limitations |
 | `backend/neuroloop/readout.py`, `comparison.py` | Numerical summaries and fixed response similarity |
 | `backend/neuroloop/policy.py` | Context-specific edit statistics and Thompson sampling |
 | `backend/neuroloop/tsam.py`, `anatomy.py` | Independent audiovisual logits and compatible anatomical readout |
@@ -99,10 +100,15 @@ The active app uses `.runtimes/app`; model execution uses `.runtimes/model`, and
    explicitly provided timings take precedence. Text requires real supplied timing.
 3. A static image requires an explicitly acknowledged repeated-frame presentation.
    This is an experimental input adaptation, not proof of thumbnail effectiveness.
-4. `models/load_local_tribe.py` selects V-JEPA2 INT8 video features, Llama-3.2-3B
-   base NF4 text features and official Wav2Vec-BERT audio features. Audio encoding
-   and video hidden-state pooling use CPU; GPU feature/model work is bounded.
-   DINOv2-large is downloaded but inactive in the shipped feature configuration.
+4. The modality planner selects only the trained feature keys justified by the
+   asset: video uses V-JEPA2 INT8, audio adds Wav2Vec-BERT when an audio stream is
+   present, and timed words add Llama-3.2-3B base NF4. Text-only runs use the text
+   branch; silent visual runs do not load audio or text; audio-only runs do not
+   load video. Audio encoding and compact video feature pooling use CPU after the
+   configured layer-group mean is computed; GPU feature/model work is bounded. An image uses the explicit repeated-frame video
+   adaptation because the shipped checkpoint has no compatible direct image
+   projector. DINOv2-large therefore remains optional/inactive until an
+   image-compatible checkpoint is trained and validated.
 5. The original TRIBE brain checkpoint predicts using the shared feature timeline.
    The preprocessing grid is 2 Hz; output timestamps come from TRIBE's returned
    segments and must not be replaced by an assumed display rate.
@@ -110,8 +116,11 @@ The active app uses `.runtimes/app`; model execution uses `.runtimes/model`, and
    10,242 fsaverage5 vertices each. The code atomically writes the array, returned
    segments and evidence. The audit independently recomputed these summaries.
 7. Optional TSAM reads the original audiovisual source separately on CPU. It emits
-   eight signed logits per complete five-second window. It is not a TRIBE decoder
-   and contributes nothing to the optimization score.
+   eight signed logits per complete five-second window. It is not a TRIBE decoder,
+   is not applicable to a text-only stimulus, and contributes nothing to the
+   optimization score. Text runs describe predicted average cortical response to
+   a timed stimulus; they do not measure the reader's actual feeling or brain
+   activity without a separate validated human-sensor pipeline.
 
 The 20,484 points are **surface vertices, not individual neurons**. The brain UI
 shows a cortical mesh, with surface/points/wireframe modes, hemisphere spacing,

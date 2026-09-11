@@ -7,6 +7,7 @@ from .config import settings
 from .db import Session, Asset, Project, Run, Evaluation, Experiment, RunEvent, ArchivedRecord, as_dict, uid, now
 from .schemas import ProjectCreate, RunCreate, CreativeCreate
 from .media import inspect_media, thumbnail, digest, compose, SUFFIXES
+from .modality import plan_for_asset, routing_capabilities
 
 class DomainError(ValueError):
     pass
@@ -100,18 +101,20 @@ def _require_requested_readouts(body: RunCreate, root: Path) -> None:
 def capabilities() -> dict:
     s=settings(); root=s.root
     assets=[('TRIBE brain weights',root/'tribev2-balanced-qv-local/best.ckpt'),('INT8 video encoder',root/'tribev2-balanced-qv-local/quantized_video/model.safetensors'),('NF4 text encoder',root/'models/text/llama-3.2-3b-unsloth-q4/model.safetensors'),('Audio encoder',root/'models/audio/w2v-bert-2.0/model.safetensors')]
+    optional_assets=[('DINOv2 image encoder',root/'models/vision/dinov2-large/model.safetensors')]
     with Session() as db:
         latest=db.scalar(select(Evaluation).order_by(Evaluation.created_at.desc()).limit(1))
         verification={'evaluation_id':latest.id,'profile':latest.profile,'created_at':latest.created_at} if latest else None
     from .execution_guard import execution_status
     from .generation import statuses as generation_statuses
     readouts=readout_asset_status(root)
-    return {'product':'NeuroLoop','version':'0.1.0','execution':execution_status(),'deployment':'single-workspace authenticated local service','training':False,'models':[{'name':name,'status':'downloaded' if path.is_file() else 'missing'} for name,path in assets],
+    return {'product':'NeuroLoop','version':'0.1.0','execution':execution_status(),'deployment':'single-workspace authenticated local service','training':False,'models':[{'name':name,'status':'downloaded' if path.is_file() else 'missing'} for name,path in assets+optional_assets],
       'tribe':{'status':'weights_present' if all(p.is_file() for _,p in assets) else 'missing_weights','last_technical_test':verification,'meaning':'Predicted average-subject cortical response; not thoughts or purchase intent.'},
       'tsam':{**readouts['tsam'],'reason':'Independent CPU audiovisual readout. Install the checkpoint and pinned source tree later; outputs remain uncalibrated relative evidence and research/non-commercial restrictions apply.'},
       'kragel':{**readouts['kragel'],'reason':'Published pattern-expression scaffold only. Install the seven source volume pairs later; registration, scoring and transfer remain scientifically unvalidated and upstream terms apply.'},
       'generation_providers':generation_statuses(),
-      'modalities':{'video':'neural analysis and bounded controlled edits','image':'explicit experimental repeated-frame presentation','audio':'audio response; local speech transcription or supplied timed words','text':'requires explicit timed-word transcript'},
+      'modalities':{'video':'neural analysis and bounded controlled edits','image':'explicit experimental repeated-frame presentation','audio':'audio response; local speech transcription or supplied timed words','text':'timed-text stimulus using the text encoder; no individual reader measurement'},
+      'model_routing':routing_capabilities(),
       'asr':{'status':'available' if (root/'models/preprocessing/faster-whisper-small/model.bin').exists() else 'not_installed','purpose':'Speech preprocessing only; not another content judge.'},
       'integrations':[
         {'name':'Weights & Biases Weave','status':'configured' if s.weave_enabled and bool(os.getenv('WANDB_API_KEY')) else 'not_configured','purpose':'Experiment trace and metric provenance'},
@@ -223,11 +226,21 @@ def create_run(body: RunCreate,key: str | None=None,expected_project:dict|None=N
             words=(body.transcript or selected.details.get('transcript',[])) if media_id==original.id else selected.details.get('transcript',[])
             if selected.details.get('has_audio') and not body.no_speech and not words and not asr_ready:
                 raise DomainError('Speech preprocessing is unavailable. Supply timed words for each spoken asset, or explicitly confirm all inputs contain no speech.')
+        request_dict=body.model_dump()
+        modality_plans={}
+        for media_id in [original.id]+active_refs:
+            selected=db.get(Asset,media_id)
+            words=(body.transcript or selected.details.get('transcript',[])) if media_id==original.id else selected.details.get('transcript',[])
+            selected_config={**request_dict,'transcript':words}
+            try:
+                modality_plans[media_id]=plan_for_asset(selected.kind,selected.details,selected_config).as_dict()
+            except ValueError as exc:
+                raise DomainError(str(exc)) from exc
         snapshots={media_id:dict(db.get(Asset,media_id).details) for media_id in [original.id]+active_refs}
         objective='response-target-distance/v1' if body.objective=='response_target' else 'spatially-centered-cosine/eight-normalized-time-bins/v1'
-        config={'request':body.model_dump(),'project_snapshot':as_dict(project),'asset_metadata_snapshots':snapshots,'objective':objective}
+        config={'request':request_dict,'project_snapshot':as_dict(project),'asset_metadata_snapshots':snapshots,'modality_plans':modality_plans,'objective':objective}
         run=Run(project_id=project.id,mode=body.mode,max_evaluations=body.max_evaluations,config=config,idempotency_key=key)
-        db.add(run); db.flush(); db.add(RunEvent(run_id=run.id,kind='queued',message='Run queued with a fixed objective and evaluation budget.',details={'budget':body.max_evaluations}))
+        db.add(run); db.flush(); db.add(RunEvent(run_id=run.id,kind='queued',message='Run queued with a fixed objective, evaluation budget, and input-specific model plan.',details={'budget':body.max_evaluations,'modality_plans':modality_plans}))
         return as_dict(run)
 
 def get_run(identity: str) -> dict:

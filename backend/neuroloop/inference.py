@@ -6,6 +6,7 @@ There is no generated Python execution and no model-server shell command.
 from __future__ import annotations
 import gc, hashlib, json, os, shutil, sys, time, subprocess
 import platform
+from dataclasses import replace
 from pathlib import Path
 from functools import lru_cache
 from .persistence import atomic_json, atomic_numpy
@@ -24,7 +25,7 @@ def _digest(path: Path) -> str | None:
 @lru_cache(maxsize=1)
 def profile_id() -> str:
     root=settings().root
-    files=[root/'models/load_local_tribe.py',root/'tribev2-balanced-qv-local/load_quantized_tribev2.py',root/'tribev2-balanced-qv-local/config.yaml',root/'tribev2-balanced-qv-local/quantized_video/quantization.json',root/'tribev2-balanced-qv-local/best.ckpt',Path(__file__),root/'backend/neuroloop/tsam.py',root/'backend/neuroloop/kragel.py',root/'backend/neuroloop/response.py',root/'backend/neuroloop/schemas.py']
+    files=[root/'models/load_local_tribe.py',root/'tribev2-balanced-qv-local/load_quantized_tribev2.py',root/'tribev2-balanced-qv-local/config.yaml',root/'tribev2-balanced-qv-local/quantized_video/quantization.json',root/'tribev2-balanced-qv-local/best.ckpt',Path(__file__),root/'backend/neuroloop/modality.py',root/'backend/neuroloop/tsam.py',root/'backend/neuroloop/kragel.py',root/'backend/neuroloop/response.py',root/'backend/neuroloop/schemas.py']
     files += sorted((root/'data/geometry').glob('*.gii.gz'))
     files += sorted((root/'models/brain_readouts/kragel2015/source').glob('*.hdr'))
     files += sorted((root/'models/brain_readouts/kragel2015/source').glob('*.img'))
@@ -119,6 +120,7 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
     import pandas as pd
     import torch
     from .device import resolve_device
+    from .modality import plan_for_input
     from neuralset.events.utils import standardize_events
     from neuralset.events.transforms import AddText,AddSentenceToWords,AddContextToWords,RemoveMissing
     root=settings().root.resolve(); path=path.resolve()
@@ -154,6 +156,9 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
         if not words and not config.get('no_speech'):
             on_progress('Transcribing spoken words locally')
             words=_transcribe(audio); transcript_source='faster-whisper-small/local-CPU-int8'
+    plan=plan_for_input(original_kind,has_audio=bool(details.get('has_audio')),has_timed_text=bool(words),allow_static_presentation=bool(config.get('allow_static_presentation')))
+    if transcript_source.startswith('faster-whisper'):
+        plan=replace(plan,text_source='local_asr')
     for word in words:
         start=float(word['start']); end=float(word['end'])
         if not 0<=start<end<=duration+0.1: raise ValueError('Timed word is outside the source duration')
@@ -171,7 +176,7 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
         on_progress('Loading frozen TRIBE and local feature encoders')
         if str(root) not in sys.path: sys.path.insert(0,str(root))
         from models.load_local_tribe import load_local_tribe
-        _model=load_local_tribe(device)
+        _model=load_local_tribe(device, features_to_use=plan.tribe_features)
         _model.data.batch_size=1; _model.data.num_workers=0
     on_progress('Predicting cortical responses')
     model=_model
@@ -187,7 +192,7 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
     geometry_manifest = {path.name: _digest(path) for path in geometry_files}
     geometry_hash = hashlib.sha256(json.dumps(geometry_manifest, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     evidence=summarize(predictions,times)
-    evidence.update({'evaluator':'TRIBE v2','profile':tribe_profile,'kind':'model_predicted_cortical_response','device':device,'segment_durations':[float(x.duration) for x in segments],'source_duration':duration,'modalities':sorted(events.type.unique().tolist()),'transcript_source':transcript_source,'transcript_words':len(words),'input_adaptation':adaptation,'seconds':time.monotonic()-started,'peak_cuda_bytes':torch.cuda.max_memory_allocated() if device == 'cuda' else None,'time_note':'Official segment timestamps retained. TRIBE handles the hemodynamic offset; no extra time shift is applied.','quantization':'Original TRIBE brain checkpoint; locally quantized INT8 video and NF4 base text encoders.','limitations':['Predicted average cortical response, not an individual brain scan.','Not purchase intent, CTR, thoughts, or a calibrated emotion probability.','Quantized end-to-end neuroscience accuracy has not been established.'],'provenance':{'contract_version':'response-provenance/v1','model':{'name':'TRIBE v2','version':tribe_profile},'checkpoint':{'sha256':_digest(root/'tribev2-balanced-qv-local/best.ckpt'),'version':'best.ckpt'},'preprocessing':{'version':'TRIBE official event timeline; profile-bound','sha256':tribe_profile},'geometry':{'version':'fsaverage5-left-right-v1','sha256':geometry_hash,'files':geometry_manifest},'projection':{'version':'not_applicable/tribe-cortical-output-v1','sha256':None,'meaning':'TRIBE cortical output is not a volume projection'},'time_axis':{'version':'normalized-interval-axis/v1','source_duration':duration,'segments':[{'start':float(x.start),'duration':float(x.duration)} for x in segments]}},'emotion_decoder':{'status':'experimental' if config.get('include_kragel') else 'not_requested','reason':'Kragel pattern expression is model-to-model experimental evidence, not calibrated human emotion.'}})
+    evidence.update({'evaluator':'TRIBE v2','profile':tribe_profile,'kind':'model_predicted_cortical_response','device':device,'segment_durations':[float(x.duration) for x in segments],'source_duration':duration,'modalities':sorted(events.type.unique().tolist()),'transcript_source':transcript_source,'transcript_words':len(words),'input_adaptation':adaptation or plan.input_adaptation,'model_selection':plan.as_dict(),'seconds':time.monotonic()-started,'peak_cuda_bytes':torch.cuda.max_memory_allocated() if device == 'cuda' else None,'time_note':'Official segment timestamps retained. TRIBE handles the hemodynamic offset; no extra time shift is applied.','quantization':'Original TRIBE brain checkpoint; locally quantized INT8 video and NF4 base text encoders.','limitations':['Predicted average cortical response, not an individual brain scan.','Not purchase intent, CTR, thoughts, or a calibrated emotion probability.','Quantized end-to-end neuroscience accuracy has not been established.','Reader feeling and reader-specific brain activity are not measured by a text stimulus alone.'],'provenance':{'contract_version':'response-provenance/v1','model':{'name':'TRIBE v2','version':tribe_profile},'checkpoint':{'sha256':_digest(root/'tribev2-balanced-qv-local/best.ckpt'),'version':'best.ckpt'},'preprocessing':{'version':'TRIBE official event timeline; profile-bound','sha256':tribe_profile},'geometry':{'version':'fsaverage5-left-right-v1','sha256':geometry_hash,'files':geometry_manifest},'projection':{'version':'not_applicable/tribe-cortical-output-v1','sha256':None,'meaning':'TRIBE cortical output is not a volume projection'},'time_axis':{'version':'normalized-interval-axis/v1','source_duration':duration,'segments':[{'start':float(x.start),'duration':float(x.duration)} for x in segments]}},'emotion_decoder':{'status':'experimental' if config.get('include_kragel') else 'not_requested','reason':'Kragel pattern expression is model-to-model experimental evidence, not calibrated human emotion.'}})
     _release_model(model,torch,device)
     del model, events, rows, common
     evidence['hardware_preflight']=preflight

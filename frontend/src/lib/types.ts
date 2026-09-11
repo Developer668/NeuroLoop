@@ -53,6 +53,16 @@ export type Evaluation = {
     input_adaptation?: string;
     limitations: string[];
     transcript_source?: string;
+    model_selection?: {
+      input_kind?: string;
+      tribe_features?: string[];
+      models_loaded?: { role: string; name: string; asset: string }[];
+      inactive_feature_encoders?: string[];
+      text_source?: string;
+      input_adaptation?: string | null;
+      reader_measurement?: string;
+      notes?: string[];
+    };
     tsam?: {
       status: string;
       reason?: string;
@@ -164,6 +174,7 @@ export type Capability = {
   asr: { status: string; purpose: string };
   integrations: { name: string; status: string; purpose: string }[];
   modalities: Record<string, string>;
+  model_routing?: Record<string, unknown>;
   claim_boundaries: string[];
 };
 export type Dashboard = {

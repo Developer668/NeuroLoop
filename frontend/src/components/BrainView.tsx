@@ -320,6 +320,15 @@ export default function BrainView({
                   <dd>{ev?.transcript_source || "—"}</dd>
                 </div>
                 <div>
+                  <dt>Feature plan</dt>
+                  <dd>
+                    {ev?.model_selection?.models_loaded
+                      ?.filter((model) => model.role !== "brain_readout")
+                      .map((model) => model.name)
+                      .join(", ") || "—"}
+                  </dd>
+                </div>
+                <div>
                   <dt>Output shape</dt>
                   <dd>{ev?.shape.join(" × ") || "—"}</dd>
                 </div>

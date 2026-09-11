@@ -76,12 +76,14 @@ fall back to the previous CPU load followed by `model.to(device)`, preserving
 compatibility rather than requiring a dependency upgrade.
 
 The loader keeps the existing BF16 input path, INT8 linear weights, FP32 scales,
-and CPU FP32 hidden-state output. It does not introduce a lower-precision model
-or alter the checkpoint. Input frames are released immediately after the forward
-pass, but the full hidden-state tuple is still produced by V-JEPA and converted
-to CPU because that is the current Neuralset contract. Peak host RAM and native
-MPS allocator behavior still require a guarded real-device measurement; the
-model-free contract tests do not establish an end-to-end memory ceiling.
+and CPU FP32 feature output. It does not introduce a lower-precision model or
+alter the checkpoint. Input frames are released immediately after the forward
+pass. The shipped TRIBE config consumes a group mean over the final 25% of
+V-JEPA layers, so the wrapper computes that mean in FP32 and transfers only the
+compact result instead of materializing a host-side FP32 copy of every hidden
+layer. V-JEPA still creates its internal hidden states during the forward pass;
+peak host RAM and native MPS allocator behavior therefore require a guarded real-device measurement. The model-free contract tests do not establish an
+end-to-end memory ceiling.
 
 SafeTensors backend reference: https://github.com/safetensors/safetensors/blob/main/bindings/python/py_src/safetensors/torch.py
 
@@ -122,4 +124,4 @@ checkout at `D:\NeuroLoop\tribev2-main`; keep that folder in place.
 The original video files are retained, so total folder size is larger than the
 quantized distribution. Large weights, environments, and caches are ignored by Git.
 
-Multimodal correction: all modalities now retain TRIBE's shared 2 Hz grid. The earlier video-only 1.5 Hz setting was incompatible with multimodal concatenation. Video intermediates move to CPU before pooling; audio uses CPU in the application. Older JSON reports document their original test configuration; current application checks are under ../data/verification.
+Multimodal correction: all modalities now retain TRIBE's shared 2 Hz grid. The earlier video-only 1.5 Hz setting was incompatible with multimodal concatenation. The configured video layer-group mean is compacted before CPU token pooling; audio uses CPU in the application. Older JSON reports document their original test configuration; current application checks are under ../data/verification.

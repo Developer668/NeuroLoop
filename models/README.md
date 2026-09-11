@@ -48,11 +48,15 @@ events = model.get_events_dataframe(video_path=r"D:\path\to\advertisement.mp4")
 predictions, segments = model.predict(events=events)
 ```
 
-The helper selects the Q4 text and official audio weights plus the INT8 video
-encoder when those runtime-local assets have been installed. DINOv2 stays optional
-and inactive: the TRIBE configuration uses text/audio/video. Caches are deployment
-configuration, not repository assets. These checks do not establish arbitrary-input
-memory bounds or advertising accuracy.
+The helper can receive a `features_to_use` subset (`text`, `audio`, and/or `video`)
+from the application. The application selects Q4 text for timed words, official
+audio for an audio stream, and INT8 video for a visual stream; inactive encoders
+are not prepared and therefore do not become resident for that run. DINOv2 stays
+optional and inactive for the shipped checkpoint: its direct image feature key is
+not present in the checkpoint's compatible projector set. Images use the explicit
+repeated-frame video presentation instead. Caches are deployment configuration,
+not repository assets. These checks do not establish arbitrary-input memory bounds
+or advertising accuracy.
 
 ## Kragel: compatibility gate remains closed
 

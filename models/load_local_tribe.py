@@ -7,12 +7,13 @@ sys.path.insert(0, str(ROOT.parent / 'tribev2-balanced-qv-local'))
 from load_quantized_tribev2 import load_quantized_tribev2
 from neuroloop.device import resolve_device
 
-def load_local_tribe(device='auto'):
+def load_local_tribe(device='auto', features_to_use=None):
+    """Load TRIBE with only the feature encoders selected for this input."""
     device=resolve_device(device)
     from neuroloop.checkpoints import validate_shards
     for folder in ('text/llama-3.2-3b-unsloth-q4','audio/w2v-bert-2.0','vision/dinov2-large'):
         validate_shards(ROOT/folder)
-    tribe = load_quantized_tribev2(device=device, cache_folder=str(ROOT.parent / 'cache' / ('tribe-local-q4-int8-'+__import__('hashlib').sha256((ROOT.parent/'infrastructure/runtime/model.lock').read_bytes()).hexdigest()[:12])))
+    tribe = load_quantized_tribev2(device=device, features_to_use=features_to_use, cache_folder=str(ROOT.parent / 'cache' / ('tribe-local-q4-int8-'+__import__('hashlib').sha256((ROOT.parent/'infrastructure/runtime/model.lock').read_bytes()).hexdigest()[:12])))
     tribe.data.text_feature.model_name = str(ROOT / 'text/llama-3.2-3b-unsloth-q4')
     tribe.data.text_feature.device = 'accelerate' if device == 'cuda' else device
     tribe.data.audio_feature.model_name = str(ROOT / 'audio/w2v-bert-2.0')

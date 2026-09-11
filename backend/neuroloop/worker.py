@@ -12,6 +12,7 @@ from . import inference,media,policy
 from .readout import compare_references,METRIC
 from .response import target_score as response_target_score
 from .services import register_asset
+from .modality import plan_for_asset
 from .integrations import planner_proposal,record_evidence
 from .telemetry import traced
 from .persistence import close_mmap
@@ -46,6 +47,7 @@ def evaluation(identity: str,asset: Asset,config: dict) -> Evaluation:
     profile=inference.profile_id()
     meaningful={k:config.get(k) for k in ['no_speech','transcript','allow_static_presentation','presentation_seconds','include_tsam','include_kragel']}
     meaningful['transcript']=config.get('transcript') or asset.details.get('transcript',[])
+    meaningful['modality_plan']=plan_for_asset(asset.kind,asset.details,{**config,'transcript':meaningful['transcript']}).as_dict()
     meaningful['metric_schema']=METRIC
     key=hashlib.sha256(json.dumps({'asset':asset.sha256,'profile':profile,'preprocessing':meaningful},sort_keys=True).encode()).hexdigest()
     with Session() as db:
