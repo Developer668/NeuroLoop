@@ -99,6 +99,45 @@ def test_cancellation_terminates_owned_process(monkeypatch):
         assert db.get(Run, identity).status == 'cancelled'
 
 
+def test_direct_worker_entry_honors_execution_hold(monkeypatch):
+    from neuroloop import execution_guard
+    identity = run_record()
+    execution_guard.hold_execution('test hold', identity, {'gpu': None})
+    monkeypatch.setattr(worker, 'execute_run', lambda _: pytest.fail('held work must not execute'))
+    worker.process(identity)
+    with Session() as db:
+        row = db.get(Run, identity)
+        assert row.status == 'failed' and 'paused' in row.stop_reason
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX process-group ownership')
+def test_timeout_terminates_run_descendants(monkeypatch):
+    identity = run_record(config={'request': {'max_seconds': 0.1}})
+    launch = subprocess.Popen
+    children = []
+
+    def grouped_child(*args, **kwargs):
+        child = launch([
+            sys.executable, '-c',
+            'import subprocess,sys,time; p=subprocess.Popen([sys.executable,"-c","import time; time.sleep(60)"]); print(p.pid,flush=True); time.sleep(60)',
+        ], stdout=subprocess.PIPE, text=True, start_new_session=True)
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(worker.subprocess, 'Popen', grouped_child)
+    worker.supervise_run(identity)
+    assert children[0].poll() is not None
+    descendant_pid = int(children[0].stdout.readline().strip())
+    import psutil
+    descendant = psutil.Process(descendant_pid)
+    try:
+        descendant.wait(timeout=5)
+    except psutil.TimeoutExpired:
+        pytest.fail('run descendant survived supervisor timeout')
+    with Session() as db:
+        assert db.get(Run, identity).status == 'failed'
+
+
 def test_invalid_atomic_update_preserves_previous_evidence(tmp_path):
     import pytest
     path = tmp_path / 'evidence.json'
@@ -107,6 +146,16 @@ def test_invalid_atomic_update_preserves_previous_evidence(tmp_path):
         atomic_json(path, {'value': float('nan')})
     assert json.loads(path.read_text()) == {'completed': True}
     assert not list(tmp_path.glob('*.partial'))
+
+
+def test_worker_prediction_load_closes_mmap(tmp_path):
+    import numpy as np
+    from types import SimpleNamespace
+    path = tmp_path / 'prediction.npy'
+    np.save(path, np.ones((2, 20484), dtype=np.float32), allow_pickle=False)
+    loaded = worker.load_prediction(SimpleNamespace(prediction_path=str(path)))
+    assert not isinstance(loaded, np.memmap)
+    assert loaded.shape == (2, 20484)
 
 
 def test_windows_job_closes_owned_process():

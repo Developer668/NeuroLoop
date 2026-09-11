@@ -46,6 +46,18 @@ def _transcribe(path: Path) -> list[dict]:
     del asr; gc.collect()
     return words
 
+def _release_model(model, torch, device: str) -> None:
+    """Release stage-local model storage before a secondary readout loads."""
+    global _model
+    if _model is model:
+        _model = None
+    del model
+    gc.collect()
+    if device == 'mps':
+        empty_cache = getattr(getattr(torch, 'mps', None), 'empty_cache', None)
+        if callable(empty_cache):
+            empty_cache()
+
 def evaluate(path: Path,kind: str,details: dict,config: dict,output: Path,on_progress=lambda stage:None) -> dict:
     """Reclaim all encoder allocations between candidates via an owned child.
 
@@ -144,14 +156,18 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
         _model=load_local_tribe(device)
         _model.data.batch_size=1; _model.data.num_workers=0
     on_progress('Predicting cortical responses')
-    predictions,segments=_model.predict(events=events,verbose=False)
+    model=_model
+    with torch.inference_mode():
+        predictions,segments=model.predict(events=events,verbose=False)
     validate_response(predictions)
-    predictions=predictions.astype(np.float32)
+    predictions=np.asarray(predictions,dtype=np.float32)
     atomic_numpy(output/'prediction.npy',predictions)
     times=[float(x.start) for x in segments]
     atomic_json(output/'segments.json',[{'start':float(x.start),'duration':float(x.duration)} for x in segments])
     evidence=summarize(predictions,times)
     evidence.update({'evaluator':'TRIBE v2','profile':profile_id(),'kind':'model_predicted_cortical_response','device':device,'segment_durations':[float(x.duration) for x in segments],'source_duration':duration,'modalities':sorted(events.type.unique().tolist()),'transcript_source':transcript_source,'transcript_words':len(words),'input_adaptation':adaptation,'seconds':time.monotonic()-started,'peak_cuda_bytes':torch.cuda.max_memory_allocated() if device == 'cuda' else None,'time_note':'Official segment timestamps retained. TRIBE handles the hemodynamic offset; no extra time shift is applied.','quantization':'Original TRIBE brain checkpoint; locally quantized INT8 video and NF4 base text encoders.','limitations':['Predicted average cortical response, not an individual brain scan.','Not purchase intent, CTR, thoughts, or a calibrated emotion probability.','Quantized end-to-end neuroscience accuracy has not been established.'],'emotion_decoder':{'status':'experimental' if config.get('include_kragel') else 'not_requested','reason':'Kragel pattern expression is model-to-model experimental evidence, not calibrated human emotion.'}})
+    _release_model(model,torch,device)
+    del model, events, rows, common
     evidence['hardware_preflight']=preflight
     if config.get('include_tsam'):
         if not config.get('tsam_research_acknowledged'):

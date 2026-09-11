@@ -23,3 +23,9 @@ def atomic_json(path:Path,value:Any) -> None:
 def atomic_numpy(path:Path,value) -> None:
     import numpy as np
     _publish(path,lambda stream:np.save(stream,value,allow_pickle=False))
+
+def close_mmap(value) -> None:
+    """Close an np.load mmap without assuming every ndarray is memory-mapped."""
+    mapping = getattr(value, '_mmap', None)
+    if mapping is not None:
+        mapping.close()

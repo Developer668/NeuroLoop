@@ -14,6 +14,7 @@ from .response import target_score as response_target_score
 from .services import register_asset
 from .integrations import planner_proposal,record_evidence
 from .telemetry import traced
+from .persistence import close_mmap
 
 log=logging.getLogger(__name__)
 
@@ -81,7 +82,14 @@ def get_asset(identity: str) -> Asset:
         return item
 
 def load_prediction(item: Evaluation) -> np.ndarray:
-    return np.load(item.prediction_path,allow_pickle=False,mmap_mode='r')
+    # Result arrays are small compared with the neural models. Materialize a
+    # bounded copy here so the worker never retains mmap file descriptors while
+    # it keeps reference scores across candidate evaluations.
+    mapped=np.load(item.prediction_path,allow_pickle=False,mmap_mode='r')
+    try:
+        return mapped.copy()
+    finally:
+        close_mmap(mapped)
 
 def render_candidate(run_id: str,original: Asset,best: Asset,best_eval: Evaluation,operator: str,experiment_id: str) -> Asset:
     stage(run_id,'Rendering a controlled counterfactual')
@@ -243,6 +251,12 @@ def heartbeat(identity: str,done: threading.Event) -> None:
             if row and row.status=='running': row.heartbeat=now()
 
 def process(identity: str) -> None:
+    from .execution_guard import require_execution_enabled
+    try:
+        require_execution_enabled()
+    except RuntimeError as exc:
+        finish_interrupted(identity, str(exc))
+        return
     done=threading.Event();thread=threading.Thread(target=heartbeat,args=(identity,done),daemon=True);thread.start()
     status='completed';reason='Completed';error=None
     try:
@@ -304,7 +318,7 @@ def supervise_run(identity: str) -> None:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts'))
     from windows_job import OwnedJob
     job = OwnedJob()
-    child = subprocess.Popen(command, stdin=subprocess.DEVNULL)
+    child = subprocess.Popen(command, stdin=subprocess.DEVNULL, start_new_session=os.name != 'nt')
     started = time.monotonic()
     last_telemetry = 0.0
     try:
@@ -321,12 +335,7 @@ def supervise_run(identity: str) -> None:
                 row = db.get(Run, identity)
                 cancelled = not row or bool(row.cancel_requested)
             if pressure or cancelled or time.monotonic() - started > timeout:
-                job.close()
-                child.terminate()
-                try:
-                    child.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    child.kill(); child.wait(timeout=5)
+                job.terminate(child)
                 finish_interrupted(identity,
                     pressure or ('Cancelled; completed evidence preserved' if cancelled else 'Run time limit reached; completed evidence preserved'),
                     cancelled=cancelled)
@@ -336,11 +345,7 @@ def supervise_run(identity: str) -> None:
     finally:
         job.close()
         if child.poll() is None:
-            child.terminate()
-            try:
-                child.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                child.kill(); child.wait(timeout=5)
+            job.terminate(child)
 
 
 def main() -> None:

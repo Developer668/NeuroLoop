@@ -7,13 +7,17 @@ os.environ['HF_HUB_OFFLINE']='1'
 os.environ['TRANSFORMERS_OFFLINE']='1'
 os.environ['TOKENIZERS_PARALLELISM']='false'
 import imageio_ffmpeg
-import pandas as pd
-import numpy as np
-import torch
-from neuralset.events.utils import standardize_events
-from models.load_local_tribe import load_local_tribe
 
 def main():
+    # Keep this manual entry point behind the same hold as the service path.
+    sys.path.insert(0, str(ROOT / 'backend'))
+    from neuroloop.execution_guard import require_execution_enabled
+    require_execution_enabled()
+    import pandas as pd
+    import numpy as np
+    import torch
+    from neuralset.events.utils import standardize_events
+    from models.load_local_tribe import load_local_tribe
     torch.set_num_threads(6)
     folder=ROOT/'data/verification'; folder.mkdir(exist_ok=True)
     video=folder/'technical-motion-fixture.mp4'

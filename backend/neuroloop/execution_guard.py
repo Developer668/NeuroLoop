@@ -20,7 +20,9 @@ def memory_reserve_bytes() -> int:
     reserve_gib = 3.0
     if mac_mps_override_enabled():
         try:
-            reserve_gib = min(3.0, max(1.0, float(os.getenv('NEUROLOOP_MPS_MEMORY_RESERVE_GIB', '1.5'))))
+            # 1.5 GiB is a hard safety floor for Apple unified memory. A
+            # caller may request a more conservative reserve, never a lower one.
+            reserve_gib = min(3.0, max(1.5, float(os.getenv('NEUROLOOP_MPS_MEMORY_RESERVE_GIB', '1.5'))))
         except ValueError:
             reserve_gib = 3.0
     return int(reserve_gib * 1024**3)

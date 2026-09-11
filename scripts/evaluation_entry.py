@@ -1,5 +1,5 @@
 """Single-evaluation child. The run supervisor owns this process lifetime."""
-import json,sys,traceback
+import json,shutil,sys,traceback
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'backend'))
@@ -21,3 +21,9 @@ if __name__=='__main__':
         atomic_json(output/'process-error.json',{'error':type(exc).__name__+': '+str(exc)[:1200]})
         traceback.print_exc(file=sys.stderr)
         sys.exit(1)
+    finally:
+        # These are evaluator-owned intermediates, not published evidence.
+        for name in ('audio-16k.wav','presentation.mp4'):
+            (output/name).unlink(missing_ok=True)
+        shutil.rmtree(output/'tsam', ignore_errors=True)
+        request.unlink(missing_ok=True)

@@ -6,9 +6,11 @@ separate from TRIBE. Response-target runs may combine them only through the expl
 """
 from __future__ import annotations
 import contextlib
+import gc
 import hashlib
 import io
 import json
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -65,47 +67,53 @@ def predict_video(path: Path, duration: float, output: Path) -> dict:
         return {'status': 'not_applicable', 'reason': 'TSAM requires a complete five-second audiovisual clip.'}
     started = time.monotonic()
     torch.set_num_threads(4)
-    model, args = load_model()
     from lib.dataset.video import get_video_x
     work = output / 'tsam'; frames = work / 'frames'
     frames.mkdir(parents=True, exist_ok=True)
-    # Preserve upstream 10 FPS JPEG extraction and original audio sample rate.
-    execute(['-y', '-i', str(path), '-vf', 'scale=-1:256,fps=10', '-q:v', '0', str(frames / '%06d.jpg')])
-    wave = work / 'audio.wav'
-    execute(['-y', '-i', str(path), '-vn', '-c:a', 'pcm_s16le', str(wave)])
-    waveform, sr = sf.read(wave, dtype='float32', always_2d=True)
-    if sr * .1 > 4800:
-        raise ValueError('Audio sample rate exceeds the TSAM FFT window; resampling would require a new profile.')
-    frame_count = len(list(frames.glob('*.jpg')))
-    windows = []
-    # Evaluate every full five-second window; preserve the explicitly omitted tail.
-    with torch.inference_mode():
-        for start in range(0, int(duration) - 4, 5):
-            record = {'t': start, 'imagefolder': str(frames), 'imagefolder_size': frame_count}
-            video = get_video_x(record, args, 'validation').unsqueeze(0)
-            clip = torch.from_numpy(waveform[start * sr:(start + 5) * sr, 0].copy())
-            if len(clip) < 5 * sr:
-                raise ValueError('Audio does not cover the complete TSAM window')
-            channels = []
-            for win, hop in zip([25, 50, 100], [10, 25, 50]):
-                mel = torchaudio.transforms.MelSpectrogram(sample_rate=sr, n_fft=4800,
-                    win_length=round(win * sr / 1000), hop_length=round(hop * sr / 1000), n_mels=224)(clip)
-                channels.append(Resize((224, 224))(torch.log(mel + 1e-6).unsqueeze(0))[0])
-            audio = torch.stack(channels).reshape(1, 1, 1, 3, 224, 224)
-            logits = model(video, audio)[0].numpy()
-            if logits.shape != (8,) or not np.isfinite(logits).all():
-                raise ValueError('Invalid TSAM output; no substitute result is emitted')
-            windows.append({'start': start, 'end': start + 5, 'logits': logits.tolist(),
-                            'top_class': LABELS[int(logits.argmax())]})
-    checkpoint = settings().root / 'models/emotion/tsam/weights/tsam_weights.tar'
-    return {'status': 'experimental', 'evaluator': 'TSAM', 'labels': LABELS, 'windows': windows,
-            'seconds': time.monotonic() - started, 'device': 'cpu',
-            'weights_sha256': hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
-            'source_revision': SOURCE_REVISION, 'profile': 'upstream-default-12RGB-1audio-5s-cpu-v1',
-            'class_order_source': 'Original setup_data.py and mvlib/mvideo_lib.py; includes Neutral.',
-            'input': 'Independent audiovisual stimulus; no TRIBE response is fed into TSAM.',
-            'omitted_tail_seconds': duration - windows[-1]['end'],
-            'interpretation': 'Uncalibrated eight-class logits. Not probabilities or observed viewer emotions.',
-            'limitations': ['Upstream default inference configuration; original training configuration is not embedded in the checkpoint.',
-                            'Strict loading verifies architecture compatibility, not predictive validity on your creative.',
-                            'Research-use licensing applies. When explicitly selected for response-target optimization, the versioned ensemble may use this relative evidence for keep/revert decisions.']}
+    model = args = None
+    try:
+        model, args = load_model()
+        # Preserve upstream 10 FPS JPEG extraction and original audio sample rate.
+        execute(['-y', '-i', str(path), '-vf', 'scale=-1:256,fps=10', '-q:v', '0', str(frames / '%06d.jpg')])
+        wave = work / 'audio.wav'
+        execute(['-y', '-i', str(path), '-vn', '-c:a', 'pcm_s16le', str(wave)])
+        waveform, sr = sf.read(wave, dtype='float32', always_2d=True)
+        if sr * .1 > 4800:
+            raise ValueError('Audio sample rate exceeds the TSAM FFT window; resampling would require a new profile.')
+        frame_count = len(list(frames.glob('*.jpg')))
+        windows = []
+        # Evaluate every full five-second window; preserve the explicitly omitted tail.
+        with torch.inference_mode():
+            for start in range(0, int(duration) - 4, 5):
+                record = {'t': start, 'imagefolder': str(frames), 'imagefolder_size': frame_count}
+                video = get_video_x(record, args, 'validation').unsqueeze(0)
+                clip = torch.from_numpy(waveform[start * sr:(start + 5) * sr, 0].copy())
+                if len(clip) < 5 * sr:
+                    raise ValueError('Audio does not cover the complete TSAM window')
+                channels = []
+                for win, hop in zip([25, 50, 100], [10, 25, 50]):
+                    mel = torchaudio.transforms.MelSpectrogram(sample_rate=sr, n_fft=4800,
+                        win_length=round(win * sr / 1000), hop_length=round(hop * sr / 1000), n_mels=224)(clip)
+                    channels.append(Resize((224, 224))(torch.log(mel + 1e-6).unsqueeze(0))[0])
+                audio = torch.stack(channels).reshape(1, 1, 1, 3, 224, 224)
+                logits = model(video, audio)[0].numpy()
+                if logits.shape != (8,) or not np.isfinite(logits).all():
+                    raise ValueError('Invalid TSAM output; no substitute result is emitted')
+                windows.append({'start': start, 'end': start + 5, 'logits': logits.tolist(),
+                                'top_class': LABELS[int(logits.argmax())]})
+        checkpoint = settings().root / 'models/emotion/tsam/weights/tsam_weights.tar'
+        return {'status': 'experimental', 'evaluator': 'TSAM', 'labels': LABELS, 'windows': windows,
+                'seconds': time.monotonic() - started, 'device': 'cpu',
+                'weights_sha256': hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
+                'source_revision': SOURCE_REVISION, 'profile': 'upstream-default-12RGB-1audio-5s-cpu-v1',
+                'class_order_source': 'Original setup_data.py and mvlib/mvideo_lib.py; includes Neutral.',
+                'input': 'Independent audiovisual stimulus; no TRIBE response is fed into TSAM.',
+                'omitted_tail_seconds': duration - windows[-1]['end'],
+                'interpretation': 'Uncalibrated eight-class logits. Not probabilities or observed viewer emotions.',
+                'limitations': ['Upstream default inference configuration; original training configuration is not embedded in the checkpoint.',
+                                'Strict loading verifies architecture compatibility, not predictive validity on your creative.',
+                                'Research-use licensing applies. When explicitly selected for response-target optimization, the versioned ensemble may use this relative evidence for keep/revert decisions.']}
+    finally:
+        del model, args
+        gc.collect()
+        shutil.rmtree(work, ignore_errors=True)
