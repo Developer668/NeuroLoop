@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from neuroloop import kragel
-from neuroloop.response import COMMON, TSAM_LABELS, ensemble, kragel_relative, target_score, tsam_series
+from neuroloop.response import COMMON, TSAM_LABELS, _source_window_details, ensemble, kragel_relative, target_score, tsam_series
 from neuroloop.schemas import ResponseTarget
 from neuroloop.tsam import PREPROCESSING_VERSION, preprocessing_contract, window_plan
 
@@ -116,6 +116,41 @@ def test_overlapping_source_windows_use_explicit_overlap_axis():
     score = target_score(report, {'time_window': {'start': 0.5, 'end': 0.6}, 'emotions': {'happiness': {'desired': 0.5}}})
     assert score is not None
     assert score['segments'][0]['coverage'] == pytest.approx(1.0)
+
+
+def test_interval_union_does_not_double_count_overlap_or_hide_a_gap():
+    rows = [
+        {'start_norm': 0.0, 'end_norm': 0.7, 'values': {'happiness': 1.0}},
+        {'start_norm': 0.6, 'end_norm': 0.8, 'values': {'happiness': 0.0}},
+        {'start_norm': 0.9, 'end_norm': 1.0, 'values': {'happiness': 0.0}},
+    ]
+    values, coverage, dimension_coverage = _source_window_details(rows, 0.0, 1.0)
+    assert values['happiness'] == pytest.approx((0.6 + 0.1 * 0.5) / 0.9)
+    assert coverage == pytest.approx(0.9)
+    assert dimension_coverage['happiness'] == pytest.approx(0.9)
+
+
+def test_partial_target_segment_is_not_scoreable_even_when_observed_values_match():
+    partial = tsam_result([
+        {'start': 0, 'end': 4, 'logits': logits(happiness=20)},
+        {'start': 6, 'end': 10, 'logits': logits(happiness=20)},
+    ], duration=10)
+    report = ensemble({'tsam': partial})
+    score = target_score(report, {'time_window': {'start': 0.0, 'end': 1.0}, 'emotions': {'happiness': {'desired': 0.9}}})
+    assert score is None
+
+
+def test_source_coverage_can_be_full_while_dimension_coverage_is_partial():
+    rows = [
+        {'start_norm': 0.0, 'end_norm': 0.5, 'values': {'happiness': 1.0, 'anger': None}},
+        {'start_norm': 0.5, 'end_norm': 1.0, 'values': {'happiness': None, 'anger': 1.0}},
+    ]
+    values, coverage, dimension_coverage = _source_window_details(rows, 0.0, 1.0)
+    assert coverage == pytest.approx(1.0)
+    assert dimension_coverage['happiness'] == pytest.approx(0.5)
+    assert dimension_coverage['anger'] == pytest.approx(0.5)
+    assert values['happiness'] == pytest.approx(1.0)
+    assert values['anger'] == pytest.approx(1.0)
 
 
 def test_temporal_schema_rejects_invalid_or_empty_windows():

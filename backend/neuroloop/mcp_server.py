@@ -4,7 +4,6 @@ from mcp.server.transport_security import TransportSecuritySettings
 from . import services
 from .config import settings
 from .schemas import ProjectCreate,RunCreate
-from .db import Session,Evaluation,as_dict
 
 mcp=FastMCP('NeuroLoop',instructions='Evaluate and improve managed creative assets under a fixed budget. TRIBE predicts cortical responses, not thoughts or purchases. Query capabilities before acting: optional TSAM and Kragel readouts may be missing until installed later, and requests for unavailable readouts are rejected. Upload media through the authenticated HTTP asset endpoint. Long-running tools return a run ID; poll get_run. Never invent missing model outputs.',stateless_http=True,json_response=True,streamable_http_path='/',transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=True,allowed_hosts=settings().mcp_allowed_hosts,allowed_origins=settings().mcp_allowed_origins))
 
@@ -54,10 +53,7 @@ def cancel_run(run_id: str) -> dict:
 @mcp.tool()
 def get_evidence(evaluation_id: str) -> dict:
     """Return numerical evidence and provenance; large tensors remain in authenticated storage."""
-    with Session() as db:
-        item=db.get(Evaluation,evaluation_id)
-        if not item: raise ValueError('Evaluation not found')
-        return as_dict(item,('prediction_path',))
+    return services.get_evidence(evaluation_id)
 
 @mcp.tool()
 def export_result(run_id: str) -> dict:

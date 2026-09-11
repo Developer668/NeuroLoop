@@ -158,6 +158,18 @@ def test_direct_model_verifiers_require_headroom_before_model_imports(monkeypatc
         runpy.run_path(str(root / relative_path), run_name='__main__')
     assert calls == [relative_path]
 
+def test_worker_prediction_load_materializes_and_closes_mapping(tmp_path):
+    from types import SimpleNamespace
+    import numpy as np
+
+    path = tmp_path / 'prediction.npy'
+    np.save(path, np.ones((2, 20484), dtype=np.float32), allow_pickle=False)
+    loaded = worker.load_prediction(SimpleNamespace(prediction_path=str(path)))
+
+    assert not isinstance(loaded, np.memmap)
+    assert loaded.flags.owndata
+    assert loaded.shape == (2, 20484)
+
 
 @pytest.mark.skipif(os.name == 'nt', reason='POSIX process-group ownership')
 def test_timeout_terminates_run_descendants(monkeypatch):

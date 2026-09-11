@@ -1,5 +1,5 @@
 """Single-evaluation child. The run supervisor owns this process lifetime."""
-import json,shutil,sys,traceback
+import json,os,shutil,sys,traceback
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'backend'))
@@ -8,11 +8,13 @@ from neuroloop.execution_guard import require_execution_enabled
 
 if __name__=='__main__':
     request=Path(sys.argv[1]).resolve()
-    if not request.is_relative_to(ROOT/'data/results'):
+    configured_root=Path(os.environ.get('NEUROLOOP_ROOT',str(ROOT))).resolve()
+    allowed_results=(ROOT/'data/results',configured_root/'data/results')
+    if not any(request.is_relative_to(base) for base in allowed_results):
         raise ValueError('Evaluation request is outside managed results')
     arguments=json.loads(request.read_text(encoding='utf-8'))
     output=Path(arguments['output']).resolve()
-    if not output.is_relative_to(ROOT/'data/results'):
+    if not any(output.is_relative_to(base) for base in allowed_results):
         raise ValueError('Evaluation output is outside managed results')
     def progress(stage):print('NEUROLOOP_STAGE:'+json.dumps(stage),flush=True)
     try:

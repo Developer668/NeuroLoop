@@ -254,32 +254,80 @@ def kragel_series(result: dict | None) -> list[dict[str, Any]]:
     return rows
 
 
-def _source_window_values(rows: list[dict[str, Any]], start: float, end: float) -> tuple[dict[str, float | None] | None, float]:
-    """Duration-weight rows overlapping normalized [start, end]."""
+def _interval_union_length(intervals: list[tuple[float, float]]) -> float:
+    """Return the length of an interval union without double-counting overlap."""
+    if not intervals:
+        return 0.0
+    ordered = sorted(intervals)
+    total = 0.0
+    current_start, current_end = ordered[0]
+    for start, end in ordered[1:]:
+        if start <= current_end:
+            current_end = max(current_end, end)
+            continue
+        total += current_end - current_start
+        current_start, current_end = start, end
+    return total + current_end - current_start
+
+
+def _source_window_details(
+    rows: list[dict[str, Any]], start: float, end: float,
+) -> tuple[dict[str, float | None] | None, float, dict[str, float]]:
+    """Aggregate rows over a target interval using interval-union coverage.
+
+    Rows can overlap.  The interval union defines support, while each atomic
+    sub-interval is represented exactly once.  If multiple rows are active in
+    the same atomic interval, their finite values are averaged there; their
+    durations are not counted repeatedly.  Coverage is returned for the source
+    and for every supported dimension separately so missing dimensions cannot
+    be mistaken for zero evidence.
+    """
     if not 0 <= start < end <= 1:
         raise ValueError("Normalized target window must satisfy 0 <= start < end <= 1")
     target_duration = end - start
-    totals = {name: 0.0 for name in COMMON}
-    dimension_coverage = {name: 0.0 for name in COMMON}
-    coverage = 0.0
-    for row in rows:
-        row_start = _finite(row.get("start_norm"), "source interval start_norm")
-        row_end = _finite(row.get("end_norm"), "source interval end_norm")
-        overlap = max(0.0, min(end, row_end) - max(start, row_start))
-        if overlap <= 0:
+    intervals: list[tuple[float, float, dict[str, float | None]]] = []
+    for index, row in enumerate(rows):
+        row_start = _finite(row.get("start_norm"), f"source interval {index} start_norm")
+        row_end = _finite(row.get("end_norm"), f"source interval {index} end_norm")
+        if not 0 <= row_start < row_end <= 1:
+            raise ValueError(f"source interval {index} must satisfy 0 <= start_norm < end_norm <= 1")
+        clipped_start = max(start, row_start)
+        clipped_end = min(end, row_end)
+        if clipped_end > clipped_start:
+            intervals.append((clipped_start, clipped_end, _validate_values(row.get("values") or {}, label="source interval values")))
+    source_union = _interval_union_length([(left, right) for left, right, _ in intervals])
+    source_coverage = min(1.0, source_union / target_duration)
+    dimension_coverage: dict[str, float] = {}
+    values: dict[str, float | None] = {}
+    for name in COMMON:
+        supported = [(left, right, row_values[name]) for left, right, row_values in intervals if row_values.get(name) is not None]
+        dimension_union = _interval_union_length([(left, right) for left, right, _ in supported])
+        dimension_coverage[name] = min(1.0, dimension_union / target_duration)
+        if dimension_union <= 0:
+            values[name] = None
             continue
-        coverage = min(target_duration, coverage + overlap)
-        values = _validate_values(row.get("values") or {}, label="source interval values")
-        for name, value in values.items():
-            if value is not None:
-                totals[name] += overlap * value
-                dimension_coverage[name] += overlap
-    if coverage <= 0:
-        return None, 0.0
-    return {
-        name: totals[name] / dimension_coverage[name] if dimension_coverage[name] else None
-        for name in COMMON
-    }, min(1.0, coverage / target_duration)
+        boundaries = {left for left, right, _ in supported} | {right for left, right, _ in supported}
+        ordered = sorted(boundaries)
+        numerator = 0.0
+        for left, right in zip(ordered, ordered[1:]):
+            if right <= left:
+                continue
+            midpoint = (left + right) / 2
+            active = [value for row_left, row_right, value in supported if row_left <= midpoint < row_right]
+            if active:
+                # The atomic interval is counted once even when several rows
+                # overlap.  Equal weighting is deterministic and source-local.
+                numerator += (right - left) * (math.fsum(float(value) for value in active) / len(active))
+        values[name] = numerator / dimension_union
+    if source_union <= 0:
+        return None, 0.0, dimension_coverage
+    return values, source_coverage, dimension_coverage
+
+
+def _source_window_values(rows: list[dict[str, Any]], start: float, end: float) -> tuple[dict[str, float | None] | None, float]:
+    """Compatibility wrapper returning values and aggregate source coverage."""
+    values, coverage, _ = _source_window_details(rows, start, end)
+    return values, coverage
 
 
 def _combine_source_values(
@@ -287,6 +335,7 @@ def _combine_source_values(
     *,
     weights: Mapping[str, float] | None = None,
     coverage: Mapping[str, float] | None = None,
+    dimension_coverage: Mapping[str, Mapping[str, float]] | None = None,
 ) -> dict[str, float | None] | None:
     weights = weights or DEFAULT_SOURCE_WEIGHTS
     output: dict[str, float | None] = {}
@@ -298,7 +347,9 @@ def _combine_source_values(
             if not values or values.get(emotion) is None:
                 continue
             weight = float(weights.get(source, 0.0))
-            if coverage is not None:
+            if dimension_coverage is not None:
+                weight *= max(0.0, min(1.0, float(dimension_coverage.get(source, {}).get(emotion, 0.0))))
+            elif coverage is not None:
                 weight *= max(0.0, min(1.0, float(coverage.get(source, 0.0))))
             if weight > 0:
                 pieces.append((weight, _finite(values[emotion], f"{source}.{emotion}")))
@@ -319,18 +370,62 @@ def _merged_series(tsam_rows: list[dict[str, Any]], kragel_rows: list[dict[str, 
             continue
         source_values: dict[str, Mapping[str, Any] | None] = {}
         coverage: dict[str, float] = {}
+        dimension_coverage: dict[str, dict[str, float]] = {}
         if tsam_rows:
-            source_values["tsam"], coverage["tsam"] = _source_window_values(tsam_rows, start, end)
+            source_values["tsam"], coverage["tsam"], dimension_coverage["tsam"] = _source_window_details(tsam_rows, start, end)
         if kragel_rows:
-            source_values["kragel"], coverage["kragel"] = _source_window_values(kragel_rows, start, end)
-        values = _combine_source_values(source_values, coverage=coverage)
+            source_values["kragel"], coverage["kragel"], dimension_coverage["kragel"] = _source_window_details(kragel_rows, start, end)
+        values = _combine_source_values(source_values, coverage=coverage, dimension_coverage=dimension_coverage)
         if values is not None:
             merged.append({
                 "index": len(merged), "source": "ensemble", "start_norm": start,
                 "end_norm": end, "duration_norm": end - start, "values": values,
-                "source_coverage": coverage, "axis_version": TIME_AXIS_VERSION,
+                "source_coverage": coverage, "source_dimension_coverage": dimension_coverage,
+                "axis_version": TIME_AXIS_VERSION,
             })
     return merged
+
+
+def _temporal_window_details(
+    source_series: Mapping[str, Any],
+    start: float,
+    end: float,
+    weights: Mapping[str, float],
+) -> tuple[dict[str, float | None] | None, dict[str, float], dict[str, float], dict[str, dict[str, float]]]:
+    """Combine temporal sources and compute union support across all sources."""
+    source_values: dict[str, Mapping[str, Any] | None] = {}
+    source_coverage: dict[str, float] = {}
+    source_dimension_coverage: dict[str, dict[str, float]] = {}
+    rows_by_source: dict[str, list[dict[str, Any]]] = {}
+    for source in ("tsam", "kragel"):
+        rows = source_series.get(source) or []
+        if not rows:
+            continue
+        rows_by_source[source] = rows
+        source_values[source], source_coverage[source], source_dimension_coverage[source] = _source_window_details(rows, start, end)
+    actual = _combine_source_values(
+        source_values,
+        weights=weights,
+        coverage=source_coverage,
+        dimension_coverage=source_dimension_coverage,
+    )
+    target_duration = end - start
+    combined_dimension_coverage: dict[str, float] = {}
+    for name in COMMON:
+        supported: list[tuple[float, float]] = []
+        for rows in rows_by_source.values():
+            for index, row in enumerate(rows):
+                row_start = _finite(row.get("start_norm"), f"source interval {index} start_norm")
+                row_end = _finite(row.get("end_norm"), f"source interval {index} end_norm")
+                if not 0 <= row_start < row_end <= 1:
+                    raise ValueError(f"source interval {index} must satisfy 0 <= start_norm < end_norm <= 1")
+                values = _validate_values(row.get("values") or {}, label="source interval values")
+                if values.get(name) is not None:
+                    left, right = max(start, row_start), min(end, row_end)
+                    if right > left:
+                        supported.append((left, right))
+        combined_dimension_coverage[name] = min(1.0, _interval_union_length(supported) / target_duration)
+    return actual, source_coverage, combined_dimension_coverage, source_dimension_coverage
 
 
 def _validate_weights(weights: Mapping[str, Any]) -> dict[str, float]:
@@ -547,6 +642,11 @@ def target_score(report: dict | None, target: dict | Any | None) -> dict | None:
         start, end = window["start"], window["end"]
         if not 0 <= start < end <= 1:
             raise ValueError("Target windows must satisfy 0 <= start < end <= 1")
+        if not isinstance(window["emotions"], Mapping):
+            raise ValueError(f"Target window {window['id']} emotions must be an object")
+        unsupported = set(window["emotions"]) - set(COMMON)
+        if unsupported:
+            raise ValueError("Target contains unsupported dimension(s): " + ", ".join(sorted(unsupported)))
         whole = window["id"] == "whole-creative" and start == 0 and end == 1
         coverage = 1.0
         if whole:
@@ -554,28 +654,34 @@ def target_score(report: dict | None, target: dict | Any | None) -> dict | None:
         else:
             if not isinstance(source_series, Mapping):
                 raise ValueError("Temporal target requires an explicit response time axis")
-            source_values: dict[str, Mapping[str, Any] | None] = {}
-            source_coverage: dict[str, float] = {}
-            for source in ("tsam", "kragel"):
-                rows = source_series.get(source) or []
-                if rows:
-                    source_values[source], source_coverage[source] = _source_window_values(rows, start, end)
             scoring_weights = report.get("source_weights") or DEFAULT_SOURCE_WEIGHTS
             for source, weight in scoring_weights.items():
                 if source in ("tsam", "kragel") and (_finite(weight, f"source weight.{source}") < 0):
                     raise ValueError("Source weights cannot be negative")
-            actual = _combine_source_values(
-                source_values,
-                weights=scoring_weights,
-                coverage=source_coverage,
+            actual, source_coverage, coverage_by_dimension, source_dimension_coverage = _temporal_window_details(
+                source_series, start, end, scoring_weights,
             )
-            coverage = max(source_coverage.values(), default=0.0)
             if actual is None:
-                continue
+                return None
+            requested_names = list(window["emotions"])
+            if not requested_names or any(coverage_by_dimension.get(name, 0.0) < 1.0 - 1e-9 for name in requested_names):
+                # A target segment with a gap is not scoreable.  Returning a
+                # partial numeric match would let a candidate satisfy a target
+                # using only the observed portion of that segment.
+                return None
+            coverage = min(coverage_by_dimension[name] for name in requested_names)
         scored = _score_values(actual, window["emotions"], _window_disagreement(report, start, end))
         if scored is None:
-            continue
-        scored_segments.append({"id": window["id"], "window": [start, end], "coverage": coverage, "weight": window["weight"], **scored})
+            return None
+        segment = {"id": window["id"], "window": [start, end], "coverage": coverage, "weight": window["weight"], **scored}
+        if not whole:
+            segment.update({
+                "fully_supported": True,
+                "source_coverage": source_coverage,
+                "source_dimension_coverage": source_dimension_coverage,
+                "dimension_coverage": coverage_by_dimension,
+            })
+        scored_segments.append(segment)
     if not scored_segments:
         return None
     weights = [max(0.0, _finite(item["weight"], "target window weight")) for item in scored_segments]

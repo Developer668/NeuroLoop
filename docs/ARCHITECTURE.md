@@ -251,9 +251,11 @@ optimization score, not a percentage of viewers predicted to feel an emotion.
 normalized `[0,1]` interval or multiple named intervals. Each source is aligned to the
 same source-duration axis and scored only over actual overlap. Short clips, omitted
 tails, and disjoint/unsupported dimensions remain explicit missing coverage; changing a
-different segment cannot satisfy a selected segment's target. The response provenance
-contract records model/checkpoint/preprocessing/geometry/projection metadata plus the
-ensemble specification hash.
+different segment cannot satisfy a selected segment's target. Overlapping rows use
+interval-union coverage and are integrated once per atomic interval. A temporal target
+with any uncovered gap or partially supported requested dimension is not scoreable. The
+response provenance contract records model/checkpoint/preprocessing/geometry/projection
+metadata plus the ensemble specification hash.
 
 ### Intervention and generation boundary
 

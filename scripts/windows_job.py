@@ -52,7 +52,6 @@ class OwnedJob:
                 self.groups[process.pid] = os.getpgid(process.pid)
             except ProcessLookupError:
                 pass
-
     def close(self):
         if self.handle:
             self.kernel.CloseHandle(self.handle)
