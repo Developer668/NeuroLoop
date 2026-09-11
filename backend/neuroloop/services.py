@@ -7,6 +7,7 @@ from .config import settings
 from .db import Session, Asset, Project, Run, Evaluation, Experiment, RunEvent, ArchivedRecord, as_dict, uid, now
 from .schemas import ProjectCreate, RunCreate, CreativeCreate
 from .media import inspect_media, thumbnail, digest, compose, SUFFIXES
+from .constraints import ConstraintError, CreativeConstraints
 
 class DomainError(ValueError):
     pass
@@ -189,9 +190,10 @@ def create_run(body: RunCreate, key: str | None = None, expected_project: dict |
             raise DomainError('Headline timing requires an editable composition, not a flattened video')
         if body.mode=='optimize' and project.constraints.get('preserve_duration', True) is not True:
             raise DomainError('The current operators preserve duration; changing duration is unsupported')
-        supported_constraints={'preserve_duration','preserve_audio','locked_copy','max_filter_edits'}
-        if set(project.constraints)-supported_constraints:
-            raise DomainError('Unsupported constraints: '+', '.join(sorted(set(project.constraints)-supported_constraints)))
+        try:
+            CreativeConstraints.from_mapping(project.constraints)
+        except ConstraintError as exc:
+            raise DomainError(str(exc)) from exc
         if project.constraints.get('locked_copy') and not original.details.get('composition'):
             raise DomainError('Exact-copy locking requires an editable composition with a known text layer')
         if type(project.constraints.get('max_filter_edits',2)) is not int or not 0<=project.constraints.get('max_filter_edits',2)<=4:
