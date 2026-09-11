@@ -1,13 +1,13 @@
 # Workstream 1 — real-model safety and loop gate
 
 Date: 2026-09-11
-Scope: protected-baseline verification, real-model/MPS memory investigation, and a bounded end-to-end handoff. No model was run by this workstream.
+Scope: protected-baseline verification, real-model/MPS memory investigation, and a bounded end-to-end handoff. The initial audit was model-free; one later user-approved bounded MPS pass is recorded below.
 
 ## Verdict
 
-**BLOCKED for fresh real-model end-to-end acceptance.** The existing Apple MPS quarantine is active because host available memory fell to 299,040,768 bytes (about 0.28 GiB), below the hard 1.5 GiB reserve. The only five-second audiovisual attempt reached and saved TRIBE prediction data, then failed before TSAM/Kragel/ensemble completion. Existing one-second MPS TRIBE output is not a complete loop and does not clear the hold.
+**BLOCKED for fresh real-model end-to-end acceptance.** The Apple MPS quarantine remains active. During the one explicitly approved five-second audiovisual pass below, host available memory fell to 616,972,288 bytes (about 0.57 GiB), below the hard 1.5 GiB reserve, and the run failed before complete TSAM/Kragel/ensemble evidence. Existing one-second MPS TRIBE output is not a complete loop and does not clear the hold.
 
-This is an investigation-complete verdict, not a release claim. The hold, weights, caches, database, services, and historical receipts were not changed.
+This is an investigation-complete verdict, not a release claim. During the initial audit, the hold, weights, caches, database, services, and historical receipts were not changed. The later approved pass naturally wrote its failed run row/partial receipts and refreshed the guard hold; no manual quarantine, weight, cache, service, or database edit was made.
 
 ## Baseline and checkpoint integrity
 
@@ -21,7 +21,7 @@ working tree:                      clean before this report
 
 The protected checkpoint tree and `HEAD` had no diff, `git diff --check` was clean, and the checkpoint was reachable by both its branch ref and the worktree `HEAD`. The integration branch was inspected only as a separate ref; it was not merged, reset, or modified. Large model/runtime/data receipts are intentionally outside the protected Git snapshot.
 
-The original checkout was inspected read-only. Its active state is:
+The original checkout was inspected read-only. At initial inspection its active state was:
 
 ```text
 data/inference-quarantine.json: active=true
@@ -33,7 +33,17 @@ ram_available_bytes: 299040768
 accelerator: mps
 ```
 
-The original checkout currently reports loopback services on 8010 (API), 3010 (web), and 2718 (research). `data/services.json` still lists a worker because that service was started before the hold was written; the worker process is idle and the hold makes it wait. No worker restart, stop, queue submission, quarantine edit, or model command was performed.
+The original checkout currently reports loopback services on 8010 (API), 3010 (web), and 2718 (research). `data/services.json` still lists a worker because that service was started before the hold was written; the worker process is idle and the hold makes it wait. At that initial inspection, no worker restart, stop, queue submission, quarantine edit, or model command was performed.
+
+After the later approved single-pass measurement, the guard refreshed the hold (the workstream did not edit it):
+
+```text
+data/inference-quarantine.json: active=true
+created_at: 2026-09-11T10:27:22.692790+00:00
+interrupted_run_id: dfec484f-3b6a-445d-90d5-3e5f2eb174d2
+ram_available_bytes: 616972288
+accelerator: mps
+```
 
 ## Existing evidence, classified honestly
 
@@ -46,6 +56,7 @@ Evidence inspected in the original checkout:
 | `data/results/1c6618.../evidence.json` | A separate real one-second video-only MPS TRIBE result: 1 × 20,484, 97.794 s, 12.85 GB available at preflight | Any complete response-target loop |
 | `data/results/485470.../process.log` and `prediction.npy` | The five-second audiovisual attempt decoded audio, encoded TRIBE video features, and saved a prediction array before termination | A valid `evidence.json`, TSAM logits, Kragel trajectories, ensemble, edit, or repeat |
 | `data/results/485470.../process-error.json` | The child ended with `BrokenPipeError` while reporting the TSAM stage after the supervisor stopped the run | A model failure root cause; the broken pipe is downstream of termination |
+| User-approved run `dfec484f-3b6a-445d-90d5-3e5f2eb174d2` | The held service accepted one bounded five-second audiovisual request, entered the real TRIBE evaluation, and failed closed when available RAM fell below 1.5 GiB; the DB integrity remained `ok` | A complete TRIBE/TSAM/Kragel/ensemble result, a successful edit/repeat, or evidence that the hold can be cleared |
 | `data/inference-quarantine.json` and SQLite run row | The guard stopped run `22594d8a...` when available RAM was below 1.5 GiB; database integrity was `ok` and the run is failed with one evaluation reserved | A safe basis for retrying while the hold remains active |
 | `data/logs/*.log` and `data/services.json` | API/web/research were serving; the current service manifest is loopback-only; worker startup messages exist | That the full model worker is currently healthy or that the research log is clean (the log contains historical dependency errors) |
 
@@ -103,9 +114,17 @@ During the same evaluation child, the TRIBE model remains referenced while `pred
 - The guard's `max(1.0, configured)` permits a caller to lower the MPS reserve below 1.5 GiB. This workstream did not change it because the scope excludes core worker/guard behavior; the integration owner must close that policy gap before any release test.
 - `scripts/verify_real_tribe.py` calls the loader directly and does not consult the execution guard. `scripts/run_worker.py --run-id` calls `worker.process` directly without an in-function guard. These are unsafe direct-entry paths while quarantined and must not be used for this gate. `verify_real_media.py` goes through the held service and is rejected by the domain guard.
 
-## Bounded 5-second → 10-second measurement procedure
+## Follow-up user-approved single pass
 
-This is a future handoff procedure only. Do not execute it until the blocker below is cleared and a human explicitly approves the test. The new `scripts/profile_real_loop.py` is read-only: it monitors an already-running supervisor and does not launch a command or import a model.
+One explicit exception was approved for a single bounded MPS pass while preserving the quarantine record. The request used the existing real five-second audiovisual asset, `mode=optimize`, `objective=response_target`, `max_evaluations=2`, `max_seconds=900`, one `brightness_up` operator, and both experimental secondary stages enabled with their acknowledgement. No quarantine edit, service restart, direct model entry point, or reserve bypass was used.
+
+Run `dfec484f-3b6a-445d-90d5-3e5f2eb174d2` started at `2026-09-11T10:27:06.828007+00:00` and failed at `2026-09-11T10:27:22.715330+00:00` with `Available system memory fell below the 1.5 GiB execution reserve`. The run reserved two evaluations, but the first candidate evaluation only reached about 3.82 seconds of recorded processing and began TRIBE video encoding; no complete TSAM, Kragel, ensemble, local-edit, or repeat receipt was produced. This is a safety-gate failure, not evidence that the model itself is the root cause.
+
+After the run failed, the direct evaluation process and two FFmpeg descendants were still present on POSIX/MPS, confirming the process-tree hazard described above. They were terminated safely; no API, worker, web, research, model-cache, weight, database, or quarantine file was removed or rewritten. The remaining active hold is therefore still the correct state.
+
+## Remaining bounded 5-second → 10-second measurement procedure
+
+This is a future handoff procedure only. Do not execute another pass until the blocker below is cleared and a human explicitly approves the test. The new `scripts/profile_real_loop.py` is read-only: it monitors an already-running supervisor and does not launch a command or import a model.
 
 ### Preconditions and evidence bundle
 
@@ -159,11 +178,11 @@ A single earlier success, a saved array, a mocked evaluator test, a completed TR
 
 ## Blocker and required handoff
 
-The active quarantine is the immediate blocker and must remain active. Exact approval needed before any fresh real-model call:
+The active quarantine is the immediate blocker and must remain active. Exact approval needed before any further fresh real-model call:
 
 1. **Hardware/diagnostic owner:** complete the Windows dump/vendor diagnosis if Windows is the target, or explicitly designate Apple MPS as the target and record its total/available unified-memory evidence.
 2. **Runtime owner:** verify the model runtime and local weight manifests without importing model code; close the below-1.5-GiB configuration loophole before test approval.
 3. **Integration owner/user:** explicitly approve the two bounded runs and the exact clip/operator/budget above. Approval must not authorize clearing the quarantine, bypassing the 1.5 GiB floor, or restarting an unsafe workload.
 4. **Execution owner:** run the profiler beside the approved service, preserve all partial receipts, and stop on any reserve breach or unexpected child. Re-quarantine after either run; do not infer stability from a pass.
 
-Until those handoffs are complete, the exact truthful state is **BLOCKED**. No fresh complete TRIBE → Kragel → TSAM → ensemble → local edit → repeat evidence exists.
+Until those handoffs are complete, the exact truthful state is **BLOCKED**. No fresh complete TRIBE → Kragel → TSAM → ensemble → local edit → repeat evidence exists; the single approved pass above is partial and failed closed.
