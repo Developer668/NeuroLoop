@@ -1,0 +1,422 @@
+.neuro-page {
+  max-width: 980px;
+  margin: 8px auto 60px;
+  color: #173540;
+}
+
+.neuro-page { min-height: calc(100dvh - 150px); display: flex; flex-direction: column; margin-bottom: 0; }
+.neuro-thread { flex: 1; }
+.prompt-input { width: min(100%, 620px); margin: auto auto 0; border-radius: 24px; padding: 14px 16px; transition: width .35s cubic-bezier(.175,.885,.32,1.275), box-shadow .2s, border-color .2s; }
+.prompt-input[data-expanded="true"] { width: min(100%, 820px); }
+.prompt-input textarea { min-height: 34px; transition: min-height .2s; }
+.prompt-input[data-expanded="true"] textarea { min-height: 68px; }
+.prompt-input .neuro-compose-tools { margin-top: 10px; }
+.prompt-provider { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted, #61777f); }
+.prompt-input .neuro-send { border-radius: 12px; }
+.neuro-loading { display: flex; align-items: center; gap: 10px; padding: 16px 0; font-size: 13px; }
+.neuro-loading-grid { display: grid; grid-template-columns: repeat(3,4px); gap: 1.5px; }
+.neuro-loading-grid > span { width: 4px; height: 4px; background: currentColor; }
+.neuro-loading-label { background: linear-gradient(90deg,var(--muted,#61777f) 35%,var(--ink,#173540) 50%,var(--muted,#61777f) 65%); background-size: 200% 100%; background-clip: text; color: transparent; animation: shimmer-text 1.4s linear infinite; }
+.neuro-loading time { font-family: monospace; font-variant-numeric: tabular-nums; color: var(--muted,#61777f); font-size: 12px; }
+@keyframes pixel-on { 0%,100% { opacity: .12; } 50% { opacity: 1; } }
+@keyframes shimmer-text { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .neuro-loading-grid > span,.neuro-loading-label { animation: none !important; } .prompt-input,.prompt-input textarea { transition: none; } }
+[data-motion="reduced"] .neuro-loading-grid > span,[data-motion="reduced"] .neuro-loading-label { animation: none !important; }
+@media (max-width: 560px) { .neuro-page { min-height: calc(100dvh - 120px); } .prompt-provider { font-size: 10px; } }
+.neuro-page-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid #dce5e3;
+  padding: 15px 0 22px;
+}
+.neuro-page-top > span,
+.neuro-page-top a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.neuro-page-top > span {
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  font-weight: 700;
+}
+.neuro-page-top a {
+  font-size: 12px;
+  color: #355962;
+  text-decoration: none;
+}
+.neuro-thread {
+  margin: 22px 0;
+}
+.neuro-exchange {
+  border-bottom: 1px solid #dce5e3;
+  padding: 22px 0;
+}
+.neuro-question {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+  background: #eaf0ee;
+  padding: 9px 13px;
+  border-radius: 9px;
+  width: fit-content;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  margin: 0 0 24px auto;
+}
+.neuro-answer {
+  display: grid;
+  grid-template-columns: 27px 1fr;
+  gap: 16px;
+}
+.neuro-answer > svg {
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+.neuro-answer small {
+  font-size: 9px;
+  letter-spacing: 0.07em;
+  color: #71878b;
+}
+.neuro-answer time {
+  margin-left: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.neuro-answer p {
+  font-size: 14px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.neuro-result-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.neuro-result-links a {
+  font-size: 12px;
+  color: #285e62;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #cdded9;
+  border-radius: 7px;
+  padding: 7px 10px;
+  text-decoration: none;
+}
+.neuro-composer {
+  position: relative;
+  border: 1px solid #c7d8d3;
+  border-radius: 19px;
+  padding: 20px;
+  background: #fff;
+  box-shadow: 0 10px 40px #193f4b06;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+.neuro-composer:focus-within {
+  border-color: #6b9a96;
+  box-shadow: 0 0 0 3px #147a8210;
+}
+.neuro-composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 62px;
+  max-height: 180px;
+  resize: none;
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  background: transparent;
+  line-height: 1.6;
+  font: inherit;
+  font-size: 14px;
+  color: #173340;
+}
+.neuro-composer textarea::placeholder {
+  color: #849698;
+}
+.neuro-compose-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+}
+.neuro-command-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  background: #eef3f1;
+  color: #4b6e72;
+  border-radius: 9px;
+  padding: 7px 10px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.neuro-draft-state {
+  font-size: 10px;
+  color: #7c9193;
+}
+.neuro-send {
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: #173d4c;
+  color: white;
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+.neuro-send:hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+.neuro-send:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.neuro-command-menu {
+  position: absolute;
+  bottom: 62px;
+  left: 17px;
+  background: white;
+  box-shadow: 0 8px 35px #17354018;
+  border: 1px solid #d6e2df;
+  border-radius: 11px;
+  padding: 6px;
+  width: 170px;
+  z-index: 2;
+}
+.neuro-command-menu button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  color: #31565f;
+  cursor: pointer;
+  font-size: 12px;
+}
+.neuro-command-menu button:hover {
+  background: #eff4f2;
+}
+.neuro-footnote {
+  font-size: 10px;
+  line-height: 1.7;
+  color: #74878a;
+  text-align: center;
+  margin: 16px auto;
+  max-width: 700px;
+}
+.neuro-footnote a {
+  color: #3e7273;
+}
+.execution-hold {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 15px 18px;
+  background: #f4f0e7;
+  border: 1px solid #ded4bf;
+  border-radius: 11px;
+  margin: 0 0 25px;
+  color: #645439;
+}
+.execution-hold > svg {
+  flex-shrink: 0;
+}
+.execution-hold strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+.execution-hold p {
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 3px 0 0;
+}
+.execution-hold a {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: inherit;
+  font-size: 11px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+@media (max-width: 800px) {
+  .neuro-intro h1 {
+    font-size: 40px;
+  }
+  .neuro-artwork {
+    width: 175px;
+    height: 175px;
+  }
+  .neuro-command-cards {
+    gap: 8px;
+  }
+  .neuro-command-cards button {
+    padding: 16px 13px;
+  }
+  .execution-hold {
+    flex-wrap: wrap;
+  }
+  .execution-hold a {
+    margin-left: 33px;
+  }
+}
+@media (max-width: 560px) {
+  .neuro-intro {
+    gap: 3px;
+    padding: 27px 0 22px;
+    align-items: flex-start;
+  }
+  .neuro-artwork {
+    position: absolute;
+    width: 93px;
+    height: 93px;
+    right: 3px;
+    top: 66px;
+    opacity: 0.9;
+  }
+  .neuro-page {
+    position: relative;
+  }
+  .neuro-intro h1 {
+    font-size: 38px;
+  }
+  .neuro-intro .eyebrow {
+    display: block;
+    max-width: 170px;
+    line-height: 1.7;
+    font-size: 8px;
+  }
+  .neuro-intro p {
+    font-size: 12px;
+  }
+  .neuro-page-top a {
+    font-size: 10px;
+    gap: 5px;
+  }
+  .neuro-command-cards {
+    grid-template-columns: 1fr;
+  }
+  .neuro-command-cards button {
+    display: grid;
+    grid-template-columns: 20px 1fr auto;
+    gap: 8px 11px;
+    align-items: center;
+    padding: 14px;
+  }
+  .neuro-command-cards strong {
+    font-size: 12px;
+  }
+  .neuro-command-cards span {
+    grid-column: 2;
+    font-size: 10px;
+  }
+  .neuro-command-cards code {
+    grid-column: 3;
+    grid-row: 1/3;
+    margin: 0;
+    font-size: 9px;
+  }
+  .neuro-command-cards svg {
+    grid-row: 1/3;
+  }
+  .neuro-mode {
+    font-size: 9px;
+    gap: 6px;
+  }
+  .neuro-draft-state {
+    display: none;
+  }
+  .neuro-composer {
+    padding: 15px;
+  }
+  .neuro-answer {
+    gap: 10px;
+  }
+  .neuro-answer p {
+    font-size: 12px;
+  }
+  .neuro-footnote {
+    font-size: 9px;
+  }
+  .execution-hold {
+    padding: 12px;
+    gap: 9px;
+  }
+  .execution-hold > div {
+    flex: 1;
+  }
+  .execution-hold a {
+    margin-left: 28px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .neuro-command-cards button,
+  .neuro-send {
+    transition: none;
+  }
+  .neuro-command-cards button:hover,
+  .neuro-send:hover:not(:disabled) {
+    transform: none;
+  }
+}
+@media (max-width: 560px) {
+  .neuro-intro {
+    display: block;
+    position: relative;
+    padding-top: 20px;
+  }
+  .neuro-artwork {
+    top: 18px;
+    right: 0;
+    width: 74px;
+    height: 74px;
+  }
+  .neuro-intro .eyebrow {
+    min-height: 65px;
+    max-width: 200px;
+    padding-top: 16px;
+    font-size: 9px;
+  }
+  .execution-hold {
+    display: grid;
+    grid-template-columns: 18px 1fr;
+    align-items: start;
+  }
+  .execution-hold a {
+    grid-column: 2;
+    margin-left: 0;
+    white-space: normal;
+  }
+}
+
+/* Compact command workspace; the only responses come from the local API. */
+.neuro-command-intro { display: flex; align-items: center; gap: 18px; padding: 32px 0 12px; }
+.neuro-command-intro h1 { margin: 0 0 7px; font-size: 28px; letter-spacing: -.04em; font-weight: 550; }
+.neuro-command-intro p { margin: 0; font-size: 13px; line-height: 1.65; color: #61777f; }
+.neuro-local-label { margin-left: auto; white-space: nowrap; font-size: 10px; padding: 7px 10px; border: 1px solid #cdded9; border-radius: 20px; color: #426f71; }
+.neuro-thread:has(> div:only-child) { margin: 12px 0; }
+@media (max-width: 560px) { .neuro-command-intro { flex-wrap: wrap; gap: 12px; } .neuro-command-intro > div { flex: 1; } .neuro-local-label { margin-left: 76px; } }
+
+[data-theme="dark"] .neuro-page { color: var(--ink); }
+[data-theme="dark"] .neuro-page-top, [data-theme="dark"] .neuro-exchange { border-color: var(--line); }
+[data-theme="dark"] .neuro-composer, [data-theme="dark"] .neuro-command-menu { background: var(--surface); border-color: var(--line); }
+[data-theme="dark"] .neuro-composer textarea, [data-theme="dark"] .neuro-command-menu button { color: var(--ink); }
+[data-theme="dark"] .neuro-question, [data-theme="dark"] .neuro-command-toggle, [data-theme="dark"] .neuro-command-menu button:hover { background: var(--surface-2); color: var(--ink); }
+[data-theme="dark"] .neuro-command-intro p, [data-theme="dark"] .neuro-footnote, [data-theme="dark"] .neuro-draft-state, [data-theme="dark"] .neuro-answer small { color: var(--muted); }
+[data-theme="dark"] .neuro-page-top a, [data-theme="dark"] .neuro-result-links a, [data-theme="dark"] .neuro-footnote a, [data-theme="dark"] .neuro-local-label { color: #9bdfd4; border-color: var(--line); }

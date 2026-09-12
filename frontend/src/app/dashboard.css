@@ -1,0 +1,401 @@
+/* ------------------------------------------------------------------
+   Dashboard polish — scoped to the authenticated app shell (.app-shell).
+   The connect/auth gate renders outside this subtree, so it is untouched.
+   All motion is transform/opacity-based and disabled under
+   prefers-reduced-motion (guard at the bottom of this file).
+   ------------------------------------------------------------------ */
+.app-shell {
+  background:
+    radial-gradient(1100px 480px at 88% -120px, #e4f2f0 0%, #e4f2f000 62%),
+    radial-gradient(900px 420px at -160px 34%, #eef6f8 0%, #eef6f800 55%),
+    var(--paper);
+}
+
+/* Topbar: deeper glass, quieter hairline. */
+.app-shell .topbar {
+  background: #ffffffd9;
+  border-bottom-color: #e2eaeef2;
+  box-shadow: 0 6px 24px #16324708;
+}
+
+/* Sidebar navigation: soft slide-in on hover, accent bar when active. */
+.app-shell .nav-item {
+  position: relative;
+  transition:
+    background 0.25s,
+    color 0.25s,
+    transform 0.25s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.app-shell .nav-item:hover {
+  transform: translateX(2px);
+}
+.app-shell .nav-item.active {
+  background: linear-gradient(90deg, #e2f0f2 0%, #eaf5f6 78%, #eaf5f600);
+  color: #0e6874;
+}
+.app-shell .nav-item.active svg {
+  color: #168486;
+}
+.app-shell .nav-item .nav-end {
+  background: #168486;
+  color: #fff;
+  border-radius: 99px;
+  padding: 1px 7px;
+  font-weight: 600;
+  animation: nav-end-breathe 2.4s ease-in-out infinite;
+}
+@keyframes nav-end-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.72;
+  }
+}
+.app-shell .sidebar-create {
+  transition:
+    background 0.25s,
+    border-color 0.25s,
+    transform 0.25s;
+}
+.app-shell .sidebar-create:hover {
+  background: #eef6f7;
+  border-color: #9cc3cd;
+  transform: translateY(-1px);
+}
+.app-shell .sidebar-create > svg:last-child {
+  transition: transform 0.25s;
+}
+.app-shell .sidebar-create:hover > svg:last-child {
+  transform: translate(2px, -2px);
+}
+
+/* Stat cards: gradient numerals, accent hairline, lift on hover. */
+.app-shell .stat {
+  overflow: hidden;
+  transition:
+    transform 0.3s cubic-bezier(0.2, 0.7, 0.2, 1),
+    box-shadow 0.3s,
+    border-color 0.3s;
+}
+.app-shell .stat:before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, #168486, #6cc4bf);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.app-shell .stat:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 34px #16324712;
+  border-color: #cfe2e8;
+}
+.app-shell .stat:hover:before {
+  opacity: 1;
+}
+.app-shell .stat strong {
+  background: linear-gradient(120deg, #143c50 15%, #168486 85%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-variant-numeric: tabular-nums;
+}
+.app-shell .stat-label svg {
+  background: #e8f4f3;
+  border-radius: 7px;
+  padding: 4px;
+}
+
+/* View entrances: each new section eases in with a slight stagger. */
+@keyframes shell-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.app-shell .main > * {
+  animation: shell-in 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+}
+.app-shell .main > *:nth-child(2) {
+  animation-delay: 0.05s;
+}
+.app-shell .main > *:nth-child(3) {
+  animation-delay: 0.09s;
+}
+.app-shell .main > *:nth-child(4) {
+  animation-delay: 0.13s;
+}
+.app-shell .main > *:nth-child(n + 5) {
+  animation-delay: 0.17s;
+}
+
+/* Panels: quieter resting state, gentle lift on hover. */
+.app-shell .panel {
+  transition:
+    box-shadow 0.3s,
+    border-color 0.3s;
+}
+.app-shell .panel:hover {
+  box-shadow: 0 12px 32px #1632470b;
+  border-color: #d7e4ea;
+}
+
+/* Primary buttons: brand gradient with a shine sweep. */
+.app-shell .button.primary {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #14404f, #168486);
+  border-color: #14404f;
+}
+.app-shell .button.primary:hover {
+  background: linear-gradient(135deg, #1a4f60, #1a9aa0);
+  border-color: #1a4f60;
+}
+.app-shell .button.primary:after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -75%;
+  width: 45%;
+  background: linear-gradient(100deg, transparent, #ffffff40, transparent);
+  transform: skewX(-18deg);
+  transition: left 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.app-shell .button.primary:hover:after {
+  left: 130%;
+}
+
+/* Table rows: tint + arrow nudge while hovering a selectable run. */
+.app-shell .table-scroll tbody tr {
+  transition: background 0.25s;
+}
+.app-shell .table-scroll tbody tr.selectable:hover {
+  background: #eef7f8;
+}
+.app-shell .table-scroll tbody tr.selectable:hover .cell-title {
+  color: #10646e;
+}
+.app-shell .table-scroll td .icon-button svg {
+  transition: transform 0.25s;
+}
+.app-shell .table-scroll tbody tr.selectable:hover td .icon-button svg {
+  transform: translate(2px, -2px);
+}
+
+/* Running / queued badges get a live pulse dot. */
+.app-shell .badge.running:before,
+.app-shell .badge.queued:before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  margin-right: 5px;
+  vertical-align: 1px;
+  animation: badge-pulse 1.6s ease-in-out infinite;
+}
+@keyframes badge-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* Shortcuts and asset cards: responsive hover states. */
+.app-shell .overview-shortcuts > button {
+  transition:
+    background 0.25s,
+    border-color 0.25s,
+    transform 0.25s;
+}
+.app-shell .overview-shortcuts > button:hover {
+  transform: translateY(-1px);
+  border-color: #bcd9de;
+}
+.app-shell .overview-shortcuts > button > svg:last-child {
+  transition: transform 0.25s;
+}
+.app-shell .overview-shortcuts > button:hover > svg:last-child {
+  transform: translate(3px, -3px);
+}
+.app-shell .asset-image {
+  overflow: hidden;
+}
+.app-shell .asset-image img {
+  transition: transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.app-shell .asset-card:hover .asset-image img {
+  transform: scale(1.045);
+}
+
+/* ------------------------------------------------------------------
+   Projects view: friendlier card grid — responsive columns, hover
+   lift, image zoom, refined header strip. No markup changes.
+   ------------------------------------------------------------------ */
+@media (min-width: 1080px) {
+  .app-shell .project-grid {
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  }
+}
+.app-shell .project-card {
+  display: flex;
+  flex-direction: column;
+  transition:
+    transform 0.35s cubic-bezier(0.2, 0.7, 0.2, 1),
+    box-shadow 0.35s,
+    border-color 0.35s;
+}
+.app-shell .project-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 18px 44px #16324714;
+  border-color: #cfe0e7;
+}
+.app-shell .project-card .project-strip {
+  overflow: hidden;
+}
+.app-shell .project-card .project-strip img {
+  transition:
+    transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1),
+    filter 0.6s;
+}
+.app-shell .project-card:hover .project-strip img {
+  transform: scale(1.05);
+  filter: saturate(0.9);
+}
+.app-shell .project-card .project-strip .eyebrow {
+  border-radius: 99px;
+  padding: 4px 11px;
+  letter-spacing: 0.12em;
+}
+.app-shell .project-card .project-content {
+  flex: 1;
+}
+.app-shell .project-card .project-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.app-shell .project-card .button-row {
+  background: #f4f8fa;
+  transition: background 0.3s;
+}
+.app-shell .project-card:hover .button-row {
+  background: #eef6f7;
+}
+
+/* Brain view: gentle stage framing and control polish. */
+.app-shell .brain-stage {
+  border-radius: 12px;
+}
+.app-shell .brain-stage-top,
+.app-shell .brain-stage-bottom {
+  transition: opacity 0.3s;
+}
+.app-shell .brain-scale,
+.app-shell .brain-display-controls {
+  transition:
+    background 0.25s,
+    border-color 0.25s;
+}
+
+/* ------------------------------------------------------------------
+   Settings & connections: richer read-only panels — dark code window,
+   framed endpoint, tool cards with hover, model rows as mini-cards,
+   system blocks with an accent edge. Markup unchanged.
+   ------------------------------------------------------------------ */
+.app-shell .connection-code {
+  background: linear-gradient(160deg, #113342 0%, #0f2c3a 100%);
+  border-color: #1d4a5c;
+  color: #9fbfcb;
+}
+.app-shell .connection-code pre {
+  color: #c9e2ea;
+}
+.app-shell .connection-code pre code {
+  color: #c9e2ea;
+}
+.app-shell .connection-code .code-window-head {
+  border-bottom-color: #9fbfcb33;
+}
+.app-shell .connection-code .copy-btn {
+  background: #164052;
+  border-color: #2a5d70;
+  color: #bfe0e8;
+  transition:
+    background 0.25s,
+    border-color 0.25s;
+}
+.app-shell .connection-code .copy-btn:hover {
+  background: #1d4f63;
+  border-color: #3a7285;
+}
+.app-shell .connection-endpoint {
+  border-color: #bcd6de;
+  background: #f7fafc;
+  letter-spacing: 0.01em;
+}
+.app-shell .tool-card {
+  transition:
+    transform 0.3s cubic-bezier(0.2, 0.7, 0.2, 1),
+    border-color 0.3s,
+    background 0.3s;
+}
+.app-shell .tool-card:hover {
+  transform: translateY(-2px);
+  border-color: #bcd6de;
+  background: #f7fafc;
+}
+.app-shell .tool-card details summary {
+  cursor: pointer;
+  font-size: 10px;
+  color: var(--muted);
+}
+.app-shell .model-row {
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  transition:
+    border-color 0.3s,
+    background 0.3s;
+}
+.app-shell .model-row:hover {
+  border-color: #bcd6de;
+  background: #f7fafc;
+}
+.app-shell .system-block {
+  border-left: 2px solid #16848666;
+  border-radius: 7px;
+  padding: 13px 16px;
+  background: #f2f7f8;
+}
+.app-shell .metrics-list > div {
+  border-radius: 6px;
+  transition: background 0.25s;
+}
+.app-shell .metrics-list > div:hover {
+  background: #f5f9fa;
+}
+.app-shell .metrics-list dt {
+  font-weight: 500;
+}
+
+
+/* Reduced motion: silence everything added above. */
+@media (prefers-reduced-motion: reduce) {
+  .app-shell,
+  .app-shell *,
+  .app-shell *:before,
+  .app-shell *:after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
