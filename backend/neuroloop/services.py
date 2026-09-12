@@ -1,31 +1,145 @@
 """Shared domain services used by HTTP, MCP and the run worker."""
 from __future__ import annotations
-import json, os
+import hashlib, json, os
 from pathlib import Path
 from sqlalchemy import select, func
 from .config import settings
 from .db import Session, Asset, Project, Run, Evaluation, Experiment, RunEvent, ArchivedRecord, as_dict, uid, now
 from .schemas import ProjectCreate, RunCreate, CreativeCreate
 from .media import inspect_media, thumbnail, digest, compose, SUFFIXES
+from .modality import plan_for_asset, routing_capabilities
+from .constraints import ConstraintError, CreativeConstraints
 
 class DomainError(ValueError):
     pass
 
+
+def _readout_requirements(root: Path) -> dict[str, tuple[Path, ...]]:
+    """Return the filesystem contract for optional readouts.
+
+    This is deliberately a path-only check. It does not import a model,
+    deserialize a checkpoint, or attempt inference. The optional adapters can
+    be installed later without changing the TRIBE-only service path.
+    """
+    tsam_root = root / 'models/emotion/tsam'
+    kragel_root = root / 'models/brain_readouts/kragel2015/source'
+    kragel_emotions = ('amused', 'angry', 'content', 'fearful', 'neutral', 'sad', 'surprised')
+    return {
+        'tsam': (
+            tsam_root / 'weights/tsam_weights.tar',
+            tsam_root / 'source-code/config/default.json',
+            tsam_root / 'source-code/lib/model/backbone.py',
+            tsam_root / 'source-code/lib/model/model.py',
+            tsam_root / 'source-code/lib/model/prepare_input.py',
+            tsam_root / 'source-code/lib/dataset/video.py',
+        ),
+        'kragel': tuple(
+            path
+            for emotion in kragel_emotions
+            for path in (
+                kragel_root / f'mean_3comp_{emotion}_group_emotion_PLS_beta_BSz_10000it.hdr',
+                kragel_root / f'mean_3comp_{emotion}_group_emotion_PLS_beta_BSz_10000it.img',
+            )
+        ) + tuple(
+            root / 'data/geometry' / f'{surface}_{hemisphere}.gii.gz'
+            for surface in ('pial', 'white')
+            for hemisphere in ('left', 'right')
+        ),
+    }
+
+
+def _relative_path(root: Path, path: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def readout_asset_status(root: Path | None = None) -> dict[str, dict]:
+    """Report optional readout assets from paths only.
+
+    ``ready`` means that the files required by the current adapters exist. It
+    does not mean that the readout is scientifically validated or licensed for
+    commercial use. Missing files are returned as repository-relative paths so
+    clients can explain exactly what must be installed later.
+    """
+    root = Path(root or settings().root)
+    requirements = _readout_requirements(root)
+    result = {}
+    for name, paths in requirements.items():
+        missing = [_relative_path(root, path) for path in paths if not path.is_file()]
+        if not missing:
+            # Preserve the status strings consumed by the existing UI. The
+            # separate ``validation`` field keeps technical availability from
+            # being mistaken for scientific validation.
+            status = 'experimental_weights_present' if name == 'tsam' else 'experimental_ready'
+        elif name == 'tsam' and not (root / 'models/emotion/tsam/weights/tsam_weights.tar').is_file():
+            status = 'missing_weights'
+        else:
+            status = 'missing_assets'
+        result[name] = {
+            'status': status,
+            'ready': not missing,
+            'required': [_relative_path(root, path) for path in paths],
+            'missing': missing,
+            'validation': 'unvalidated',
+        }
+    return result
+
+
+def _require_requested_readouts(body: RunCreate, root: Path) -> None:
+    requested = (('TSAM', 'tsam', body.include_tsam), ('Kragel', 'kragel', body.include_kragel))
+    status = readout_asset_status(root)
+    for label, name, selected in requested:
+        if selected and not status[name]['ready']:
+            missing = ', '.join(status[name]['missing'])
+            raise DomainError(
+                f'{label} readout was requested, but required assets are missing: {missing}. '
+                f'Install the {label} assets later before requesting this readout.'
+            )
+    if body.mode == 'optimize' and body.objective == 'response_target' and body.include_kragel:
+        from .kragel import registration
+        if not registration().get('decision_eligible', False):
+            raise DomainError('Kragel can be displayed as a diagnostic readout, but response-target optimization requires verified spatial registration and held-out TRIBE transfer validation. Use Analyze for diagnostic projection.')
+
+def _digest(value: object) -> str:
+    """Digest JSON-serializable contract data without exposing local paths."""
+    encoded = json.dumps(value, sort_keys=True, separators=(',', ':'), default=str, allow_nan=False)
+    return hashlib.sha256(encoded.encode('utf-8')).hexdigest()
+
+
+def _public_asset(record: Asset) -> dict:
+    """Return an asset record suitable for an agent contract.
+
+    The managed path is deliberately omitted. Asset metadata is still useful
+    provenance, but an external agent never gets a filesystem target or a URL
+    to reinterpret as an execution instruction.
+    """
+    value = as_dict(record, ('path',))
+    details = dict(value.get('details') or {})
+    for key in ('path', 'source_path', 'prediction_path', 'command', 'url'):
+        details.pop(key, None)
+    value['details'] = details
+    return value
+
+
 def capabilities() -> dict:
     s=settings(); root=s.root
     assets=[('TRIBE brain weights',root/'tribev2-balanced-qv-local/best.ckpt'),('INT8 video encoder',root/'tribev2-balanced-qv-local/quantized_video/model.safetensors'),('NF4 text encoder',root/'models/text/llama-3.2-3b-unsloth-q4/model.safetensors'),('Audio encoder',root/'models/audio/w2v-bert-2.0/model.safetensors')]
+    optional_assets=[('DINOv2 image encoder',root/'models/vision/dinov2-large/model.safetensors')]
     with Session() as db:
         latest=db.scalar(select(Evaluation).order_by(Evaluation.created_at.desc()).limit(1))
         verification={'evaluation_id':latest.id,'profile':latest.profile,'created_at':latest.created_at} if latest else None
     from .execution_guard import execution_status
-    from .kragel import status as kragel_status
     from .generation import statuses as generation_statuses
-    return {'product':'NeuroLoop','version':'0.1.0','execution':execution_status(),'deployment':'single-workspace authenticated local service','training':False,'models':[{'name':name,'status':'downloaded' if path.is_file() else 'missing'} for name,path in assets],
+    readouts=readout_asset_status(root)
+    return {'product':'NeuroLoop','version':'0.1.0','execution':execution_status(),'deployment':'single-workspace authenticated local service','training':False,'models':[{'name':name,'status':'downloaded' if path.is_file() else 'missing'} for name,path in assets+optional_assets],
       'tribe':{'status':'weights_present' if all(p.is_file() for _,p in assets) else 'missing_weights','last_technical_test':verification,'meaning':'Predicted average-subject cortical response; not thoughts or purchase intent.'},
-      'tsam':{'status':'experimental_weights_present' if (root/'models/emotion/tsam/weights/tsam_weights.tar').is_file() else 'missing_weights','reason':'Independent CPU audiovisual readout. The staged macOS model runtime now includes its pinned dependencies; each requested evaluation still fails closed if strict checkpoint loading or preprocessing fails. Outputs are uncalibrated relative evidence.'},
-      'kragel':kragel_status(),
+      'tsam':{**readouts['tsam'],'reason':'Independent CPU audiovisual readout. Readiness above checks the checkpoint and source tree; outputs remain uncalibrated relative evidence and research/non-commercial restrictions apply.'},
+      'kragel':{**readouts['kragel'],'reason':'Published pattern-expression scaffold only. Readiness above checks the seven source volume pairs; registration, scoring and transfer remain scientifically unvalidated and upstream terms apply.'},
       'generation_providers':generation_statuses(),
-      'modalities':{'video':'neural analysis and bounded controlled edits','image':'explicit experimental repeated-frame presentation','audio':'audio response; local speech transcription or supplied timed words','text':'requires explicit timed-word transcript'},
+      'modalities':{'video':'neural analysis and bounded controlled edits','image':'explicit experimental repeated-frame presentation','audio':'audio response; local speech transcription or supplied timed words','text':'timed-text stimulus using the text encoder; no individual reader measurement'},
+      'model_routing':routing_capabilities(),
       'asr':{'status':'available' if (root/'models/preprocessing/faster-whisper-small/model.bin').exists() else 'not_installed','purpose':'Speech preprocessing only; not another content judge.'},
       'integrations':[
         {'name':'Weights & Biases Weave','status':'configured' if s.weave_enabled and bool(os.getenv('WANDB_API_KEY')) else 'not_configured','purpose':'Experiment trace and metric provenance'},
@@ -63,6 +177,58 @@ def create_project(body: ProjectCreate) -> dict:
         item=Project(**body.model_dump()); db.add(item); db.flush()
         return as_dict(item)
 
+
+def get_project(identity: str) -> dict:
+    """Read a project contract through the same ownership boundary as the API."""
+    with Session() as db:
+        item = db.get(Project, identity)
+        if item is None:
+            raise DomainError('Project not found')
+        return as_dict(item)
+
+
+def project_context(identity: str) -> dict:
+    """Return the bounded, read-only context an external agent may inspect.
+
+    This is intentionally a view over persisted records, not a second project
+    model. Briefs and constraints are copied from the project snapshot; assets
+    are represented by managed IDs, hashes and inspected metadata only.
+    """
+    with Session() as db:
+        project = db.get(Project, identity)
+        if project is None:
+            raise DomainError('Project not found')
+        asset_ids = list(dict.fromkeys(([project.asset_id] if project.asset_id else []) + list(project.reference_ids or [])))
+        assets = {item.id: _public_asset(item) for item in (db.get(Asset, asset_id) for asset_id in asset_ids) if item is not None}
+        runs = db.scalars(select(Run).where(Run.project_id == identity).order_by(Run.created_at.desc()).limit(50)).all()
+        return {
+            'contract': 'project-context/v1',
+            'project': as_dict(project),
+            'brief': project.brief,
+            'constraints': dict(project.constraints or {}),
+            'original': assets.get(project.asset_id) if project.asset_id else None,
+            'references': [assets[asset_id] for asset_id in project.reference_ids or [] if asset_id in assets],
+            'runs': [
+                {
+                    'id': item.id,
+                    'status': item.status,
+                    'mode': item.mode,
+                    'stage': item.stage,
+                    'evaluations_used': item.evaluations_used,
+                    'max_evaluations': item.max_evaluations,
+                    'compute_seconds': item.compute_seconds,
+                    'created_at': item.created_at,
+                    'finished_at': item.finished_at,
+                }
+                for item in runs
+            ],
+            'claim_boundaries': [
+                'Stored model evidence is not a measured human response.',
+                'Relative scores are not purchase, click-through, conversion or emotion probabilities.',
+                'Only managed asset IDs and fixed operators can enter an execution contract.',
+            ],
+        }
+
 def update_project(identity: str,body: ProjectCreate) -> dict:
     with Session.begin() as db:
         item=db.get(Project,identity)
@@ -73,7 +239,15 @@ def update_project(identity: str,body: ProjectCreate) -> dict:
         for key,value in body.model_dump().items(): setattr(item,key,value)
         return as_dict(item)
 
-def create_run(body: RunCreate,key: str | None=None,expected_project:dict|None=None) -> dict:
+def create_run(body: RunCreate, key: str | None = None, expected_project: dict | None = None,
+               agent_contract: dict | None = None) -> dict:
+    """Validate and queue one immutable run contract.
+
+    HTTP, MCP and the external-agent bridge all come through this function.
+    ``agent_contract`` is metadata supplied by the bridge; it cannot change
+    the objective or execute anything by itself.
+    """
+    _require_requested_readouts(body, settings().root)
     from .execution_guard import execution_status
     if execution_status()['paused']:
         raise DomainError('Model execution is paused after a Windows graphics crash. Saved results remain available. Resolve the crash investigation before enabling another GPU run.')
@@ -108,9 +282,10 @@ def create_run(body: RunCreate,key: str | None=None,expected_project:dict|None=N
             raise DomainError('Headline timing requires an editable composition, not a flattened video')
         if body.mode=='optimize' and project.constraints.get('preserve_duration', True) is not True:
             raise DomainError('The current operators preserve duration; changing duration is unsupported')
-        supported_constraints={'preserve_duration','preserve_audio','locked_copy','max_filter_edits'}
-        if set(project.constraints)-supported_constraints:
-            raise DomainError('Unsupported constraints: '+', '.join(sorted(set(project.constraints)-supported_constraints)))
+        try:
+            CreativeConstraints.from_mapping(project.constraints)
+        except ConstraintError as exc:
+            raise DomainError(str(exc)) from exc
         if project.constraints.get('locked_copy') and not original.details.get('composition'):
             raise DomainError('Exact-copy locking requires an editable composition with a known text layer')
         if type(project.constraints.get('max_filter_edits',2)) is not int or not 0<=project.constraints.get('max_filter_edits',2)<=4:
@@ -136,20 +311,149 @@ def create_run(body: RunCreate,key: str | None=None,expected_project:dict|None=N
             words=(body.transcript or selected.details.get('transcript',[])) if media_id==original.id else selected.details.get('transcript',[])
             if selected.details.get('has_audio') and not body.no_speech and not words and not asr_ready:
                 raise DomainError('Speech preprocessing is unavailable. Supply timed words for each spoken asset, or explicitly confirm all inputs contain no speech.')
+        request_dict=body.model_dump()
+        modality_plans={}
+        for media_id in [original.id]+active_refs:
+            selected=db.get(Asset,media_id)
+            words=(body.transcript or selected.details.get('transcript',[])) if media_id==original.id else selected.details.get('transcript',[])
+            selected_config={**request_dict,'transcript':words}
+            try:
+                modality_plans[media_id]=plan_for_asset(selected.kind,selected.details,selected_config).as_dict()
+            except ValueError as exc:
+                raise DomainError(str(exc)) from exc
         snapshots={media_id:dict(db.get(Asset,media_id).details) for media_id in [original.id]+active_refs}
         objective='response-target-distance/v1' if body.objective=='response_target' else 'spatially-centered-cosine/eight-normalized-time-bins/v1'
-        config={'request':body.model_dump(),'project_snapshot':as_dict(project),'asset_metadata_snapshots':snapshots,'objective':objective}
+        config={'request':request_dict,'project_snapshot':as_dict(project),'asset_metadata_snapshots':snapshots,'modality_plans':modality_plans,'objective':objective}
+        if agent_contract is not None:
+            if not isinstance(agent_contract, dict):
+                raise DomainError('Agent run metadata must be an object')
+            expected_snapshots = agent_contract.get('asset_metadata_snapshots')
+            if expected_snapshots is not None:
+                if not isinstance(expected_snapshots, dict):
+                    raise DomainError('Agent asset provenance must be an object')
+                for asset_id, expected in expected_snapshots.items():
+                    selected = db.get(Asset, asset_id)
+                    if selected is None or dict(selected.details or {}) != dict(expected or {}):
+                        raise DomainError('An approved source asset changed since the proposal was reviewed')
+            # Only the already validated bridge can provide this metadata. A
+            # starting asset is still checked here so an ID can never become
+            # an arbitrary filesystem or URL target.
+            starting_asset_id = agent_contract.get('starting_asset_id')
+            if starting_asset_id is not None:
+                starting = db.get(Asset, starting_asset_id)
+                if starting is None:
+                    raise DomainError('The approved continuation asset no longer exists')
+                if starting.kind != original.kind:
+                    raise DomainError('The approved continuation asset has a different source modality')
+                expected_start = agent_contract.get('starting_asset_snapshot')
+                if isinstance(expected_start, dict) and _public_asset(starting) != expected_start:
+                    raise DomainError('The approved continuation asset changed since the proposal was reviewed')
+                contract = dict(agent_contract)
+                contract['starting_asset_snapshot'] = _public_asset(starting)
+                config['starting_asset_id'] = starting.id
+                config['agent_contract'] = contract
+            else:
+                config['agent_contract'] = dict(agent_contract)
         run=Run(project_id=project.id,mode=body.mode,max_evaluations=body.max_evaluations,config=config,idempotency_key=key)
-        db.add(run); db.flush(); db.add(RunEvent(run_id=run.id,kind='queued',message='Run queued with a fixed objective and evaluation budget.',details={'budget':body.max_evaluations}))
+        db.add(run); db.flush(); db.add(RunEvent(run_id=run.id,kind='queued',message='Run queued with a fixed objective, evaluation budget, and input-specific model plan.',details={'budget':body.max_evaluations,'modality_plans':modality_plans}))
         return as_dict(run)
+
+def _evaluation_ids(value: object) -> set[str]:
+    """Collect only explicit evaluation references from persisted evidence."""
+    found: set[str] = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if (key == 'evaluation_id' or key.endswith('_evaluation_id')) and isinstance(item, str):
+                found.add(item)
+            elif key.endswith('_evaluation_ids') and isinstance(item, list):
+                found.update(entry for entry in item if isinstance(entry, str))
+            else:
+                found.update(_evaluation_ids(item))
+    elif isinstance(value, list):
+        for item in value:
+            found.update(_evaluation_ids(item))
+    return found
+
+
+def _provenance(row: Run, experiments: list[Experiment], evaluations: list[Evaluation], assets: dict[str, Asset]) -> dict:
+    request = (row.config or {}).get('request', {})
+    experiment_rows = []
+    for experiment in experiments:
+        evidence_ids = sorted(_evaluation_ids(experiment.evidence or {}))
+        specification = experiment.specification or {}
+        intervention = specification.get('intervention') if isinstance(specification.get('intervention'), dict) else specification
+        experiment_rows.append({
+            'id': experiment.id,
+            'sequence': experiment.sequence,
+            'operator': experiment.operator,
+            'decision': experiment.decision,
+            'asset_id': experiment.asset_id,
+            'specification_digest': _digest(specification),
+            'intervention_digest': specification.get('intervention_digest') or _digest(intervention),
+            'evidence_digest': _digest(experiment.evidence or {}),
+            'evaluation_ids': evidence_ids,
+        })
+    evaluation_rows = []
+    for evaluation in evaluations:
+        evaluation_rows.append({
+            'id': evaluation.id,
+            'asset_id': evaluation.asset_id,
+            'asset_sha256': assets[evaluation.asset_id].sha256 if evaluation.asset_id in assets else None,
+            'cache_key': evaluation.cache_key,
+            'evaluator': evaluation.evaluator,
+            'profile': evaluation.profile,
+            'evidence_digest': _digest(evaluation.evidence or {}),
+            'created_at': evaluation.created_at,
+        })
+    return {
+        'contract': 'run-provenance/v1',
+        'run_id': row.id,
+        'project_id': row.project_id,
+        'request_digest': _digest(request),
+        'config_digest': _digest(row.config or {}),
+        'objective': (row.config or {}).get('objective'),
+        'agent_contract': (row.config or {}).get('agent_contract'),
+        'experiments': experiment_rows,
+        'evaluations': evaluation_rows,
+        'immutability': 'IDs, hashes, evaluator profiles and recorded evidence are observations; no missing output is inferred.',
+    }
+
 
 def get_run(identity: str) -> dict:
     with Session() as db:
         row=db.get(Run,identity)
         if not row: raise DomainError('Run not found')
+        experiments=list(db.scalars(select(Experiment).where(Experiment.run_id==identity).order_by(Experiment.sequence)))
+        events=[as_dict(x) for x in db.scalars(select(RunEvent).where(RunEvent.run_id==identity).order_by(RunEvent.id))]
+        ids=_evaluation_ids(row.result or {})
+        ids.update(_evaluation_ids([item.evidence for item in experiments]))
+        evaluations=[db.get(Evaluation,evaluation_id) for evaluation_id in sorted(ids)]
+        evaluations=[item for item in evaluations if item is not None]
+        assets={item.id:item for item in (db.get(Asset,evaluation.asset_id) for evaluation in evaluations) if item is not None}
         result=as_dict(row)
-        result['experiments']=[as_dict(x) for x in db.scalars(select(Experiment).where(Experiment.run_id==identity).order_by(Experiment.sequence))]
-        result['events']=[as_dict(x) for x in db.scalars(select(RunEvent).where(RunEvent.run_id==identity).order_by(RunEvent.id))]
+        result['experiments']=[as_dict(x) for x in experiments]
+        result['events']=events
+        result['provenance']=_provenance(row,experiments,evaluations,assets)
+        return result
+
+
+def get_evidence(identity: str) -> dict:
+    """Return persisted evidence plus identity hashes, never a fabricated array."""
+    with Session() as db:
+        item=db.get(Evaluation, identity)
+        if item is None:
+            raise DomainError('Evaluation not found')
+        result=as_dict(item, ('prediction_path',))
+        asset=db.get(Asset,item.asset_id)
+        result['provenance']={
+            'contract':'evaluation-provenance/v1',
+            'evaluation_id':item.id,
+            'asset_id':item.asset_id,
+            'asset_sha256':asset.sha256 if asset else None,
+            'cache_key':item.cache_key,
+            'evidence_digest':_digest(item.evidence or {}),
+            'meaning':'Persisted model evidence only; no human-response or purchase claim.',
+        }
         return result
 
 def cancel_run(identity: str) -> dict:

@@ -758,6 +758,112 @@
     display: none;
   }
 }
+/* ------------------------------------------------------------------
+   Motion & depth layer — compositor-friendly (transform/opacity),
+   automatically silenced by the reduced-motion block below.
+   ------------------------------------------------------------------ */
+.landing-hero {
+  position: relative;
+}
+/* Faint blueprint dot-grid that fades out below the fold. */
+.landing-hero:before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(#16324709 1px, transparent 1px);
+  background-size: 26px 26px;
+  mask-image: linear-gradient(180deg, #000 0%, transparent 72%);
+  pointer-events: none;
+}
+/* Scroll-aware nav: condenses and deepens its glass once scrolling. */
+.landing-nav {
+  transition:
+    height 0.4s cubic-bezier(0.2, 0.7, 0.2, 1),
+    background 0.4s,
+    box-shadow 0.4s,
+    border-color 0.4s;
+}
+.landing-nav.scrolled {
+  height: 66px;
+  background: #ffffffd9;
+  box-shadow: 0 10px 34px #16324714;
+  border-color: #dbe7ec;
+}
+/* Staggered hero entrance choreography. */
+@keyframes hero-rise {
+  from {
+    opacity: 0;
+    transform: translateY(26px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.hero-copy-new > * {
+  animation: hero-rise 0.75s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+}
+.hero-copy-new .eyebrow {
+  animation-delay: 0.05s;
+}
+.hero-copy-new h1 {
+  animation-delay: 0.14s;
+}
+.hero-copy-new > p {
+  animation-delay: 0.26s;
+}
+.hero-actions {
+  animation-delay: 0.38s;
+}
+.input-formats {
+  animation-delay: 0.5s;
+}
+/* Slow luminous sweep across the hero accent word. */
+.hero-copy-new h1 span {
+  background: linear-gradient(100deg, #147a82 20%, #2fb3a8 45%, #147a82 70%);
+  background-size: 260% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: accent-sweep 7s ease-in-out infinite;
+}
+@keyframes accent-sweep {
+  0%,
+  100% {
+    background-position: 0% 0;
+  }
+  50% {
+    background-position: 100% 0;
+  }
+}
+/* Pointer-tracked spotlight inside the observatory. */
+.hero-observatory:after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: radial-gradient(
+    430px circle at var(--mx, 55%) var(--my, 42%),
+    #16848617,
+    transparent 68%
+  );
+  opacity: 0;
+  transition: opacity 0.5s;
+  pointer-events: none;
+}
+.hero-observatory:hover:after {
+  opacity: 1;
+}
+/* Observatory readouts become a quiet glass instrument bar. */
+.label-bottom {
+  padding: 15px 20px;
+  border-radius: 13px;
+  background: #ffffffb5;
+  backdrop-filter: blur(10px);
+  border: 1px solid #dfeaf0;
+  box-shadow: 0 16px 44px #16324714;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .landing * {
     animation: none !important;
@@ -765,3 +871,271 @@
     transform: none !important;
   }
 }
+
+/* Shine sweep across the primary hero button. */
+.landing .button.primary {
+  position: relative;
+  overflow: hidden;
+}
+.landing .button.primary:after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -75%;
+  width: 45%;
+  background: linear-gradient(100deg, transparent, #ffffff4d, transparent);
+  transform: skewX(-18deg);
+  transition: left 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.landing .button.primary:hover:after {
+  left: 130%;
+}
+/* Method strip micro-interactions. */
+.method-strip > span {
+  transition: color 0.3s;
+}
+.method-strip > span:hover {
+  color: #13797d;
+}
+.method-strip svg {
+  transition: transform 0.3s;
+}
+.method-strip > span:hover svg {
+  transform: scale(1.25);
+}
+/* Experiment diagram: links breathe, the variant node emits a soft ring. */
+.experiment-diagram > i {
+  transform-origin: top;
+  animation: node-pulse 2.6s ease-in-out infinite;
+}
+@keyframes node-pulse {
+  0%,
+  100% {
+    transform: scaleY(1);
+    opacity: 0.75;
+  }
+  50% {
+    transform: scaleY(1.4);
+    opacity: 1;
+  }
+}
+.experiment-diagram .variant-node:after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 6px;
+  border: 1px solid #84cecc;
+  opacity: 0;
+  animation: node-glow 2.8s ease-out infinite;
+}
+@keyframes node-glow {
+  0% {
+    opacity: 0.75;
+    transform: scale(1);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.32);
+  }
+}
+/* Evidence rows cascade forward as a card is hovered. */
+.evidence-graphic > div {
+  transition:
+    transform 0.35s cubic-bezier(0.2, 0.7, 0.2, 1),
+    border-color 0.35s;
+}
+.process-steps article:hover .evidence-graphic > div {
+  transform: translateX(6px);
+  border-color: #b9d9de;
+}
+.process-steps article:hover .evidence-graphic > div:nth-child(2) {
+  transition-delay: 0.05s;
+}
+.process-steps article:hover .evidence-graphic > div:nth-child(3) {
+  transition-delay: 0.1s;
+}
+/* MCP terminal: lines type in once the panel scrolls into view. */
+@keyframes terminal-line {
+  from {
+    opacity: 0;
+    transform: translateY(9px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.agent-terminal.revealed .terminal-content > * {
+  animation: terminal-line 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.agent-terminal.revealed .terminal-content > *:nth-child(1) {
+  animation-delay: 0.1s;
+}
+.agent-terminal.revealed .terminal-content > *:nth-child(2) {
+  animation-delay: 0.22s;
+}
+.agent-terminal.revealed .terminal-content > *:nth-child(3) {
+  animation-delay: 0.34s;
+}
+.agent-terminal.revealed .terminal-content > *:nth-child(4) {
+  animation-delay: 0.46s;
+}
+.agent-terminal.revealed .terminal-content > *:nth-child(5) {
+  animation-delay: 0.58s;
+}
+.agent-terminal.revealed .terminal-content > *:nth-child(6) {
+  animation-delay: 0.7s;
+}
+.agent-terminal.revealed .terminal-content > *:nth-child(7) {
+  animation-delay: 0.82s;
+}
+.agent-terminal.revealed .terminal-content > *:nth-child(8) {
+  animation-delay: 0.94s;
+}
+.agent-terminal.revealed .terminal-content > *:nth-child(n + 9) {
+  animation-delay: 1.05s;
+}
+/* Blinking caret on the last tool call. */
+.terminal-content > code:last-of-type:after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 13px;
+  margin-left: 6px;
+  background: #84cecb;
+  vertical-align: -2px;
+  animation: caret-blink 1.05s step-end infinite;
+}
+@keyframes caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+/* Honest-science paragraphs ease up as they enter. */
+@keyframes rise-soft {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.honest-science > div p {
+  animation: rise-soft 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+}
+.honest-science > div p + p {
+  animation-delay: 0.12s;
+}
+/* Explicit reduced-motion guard for the motion layer appended after the
+   blanket rule, so every new effect is silenced for those visitors too. */
+@media (prefers-reduced-motion: reduce) {
+  .landing *,
+  .landing *:before,
+  .landing *:after {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+  .hero-copy-new h1 span {
+    color: #168486;
+    background: none;
+  }
+  .hero-observatory:after {
+    display: none;
+  }
+  .terminal-content > code:last-of-type:after {
+    display: none;
+  }
+}
+.build-easter-egg {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+}
+.build-easter-egg details {
+  border-top: 1px solid #d7e3e5;
+  border-bottom: 1px solid #d7e3e5;
+}
+.build-easter-egg summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 24px 0;
+  cursor: pointer;
+  list-style: none;
+}
+.build-easter-egg summary::-webkit-details-marker { display: none; }
+.build-easter-egg summary:focus-visible {
+  outline: 2px solid #137d83;
+  outline-offset: 6px;
+  border-radius: 4px;
+}
+.build-easter-egg .eyebrow { display: block; margin-bottom: 10px; }
+.build-easter-egg-title { font-size: clamp(18px, 3vw, 26px); color: #102b3f; }
+.build-easter-egg-toggle {
+  font-size: 28px;
+  color: #137d83;
+  transition: transform 180ms ease;
+}
+.build-easter-egg details[open] .build-easter-egg-toggle { transform: rotate(45deg); }
+.build-easter-egg figure { margin: 0 0 24px; }
+.build-easter-egg img { display: block; width: 100%; height: auto; border-radius: 12px; }
+.build-easter-egg figcaption { margin-top: 14px; color: #516773; font-size: 13px; }
+@media (prefers-reduced-motion: reduce) {
+  .build-easter-egg-toggle { transition: none; }
+}
+.integration-strip { padding: 24px 0; border-top: 1px solid #e2e9e9; border-bottom: 1px solid #e2e9e9; margin: 0 0 20px; }
+.integration-strip-heading { display: flex; align-items: center; justify-content: space-between; max-width: 1120px; margin: 0 auto 12px; padding: 0 24px; }
+.integration-strip-heading button { background: transparent; border: 1px solid #d5e0e1; border-radius: 20px; padding: 7px 13px; color: #516773; font: inherit; font-size: 12px; cursor: pointer; }
+.integration-window { overflow: hidden; mask-image: linear-gradient(to right, transparent, black 8%, black 92%, transparent); }
+.integration-track { display: flex; width: max-content; animation: integration-drift 32s linear infinite; }
+.integration-group { display: flex; flex: 0 0 auto; align-items: center; }
+.integration-item { width: clamp(220px, 27vw, 330px); flex-shrink: 0; text-align: center; padding: 8px 24px; }
+.integration-logo { height: 44px; display: flex; align-items: center; justify-content: center; gap: 10px; }
+.integration-logo img { object-fit: contain; max-height: 40px; }
+.integration-logo img[alt="Weights & Biases"] { filter: brightness(0); }
+.integration-logo > span { color: #102b3f; font-size: 28px; font-weight: 600; letter-spacing: -1px; }
+.integration-role { display: block; margin-top: 8px; font-size: 11px; color: #516773; }
+.integration-details { display: block; width: fit-content; margin: 12px auto 0; color: #137d83; font-size: 13px; }
+.integration-strip:hover .integration-track, .integration-strip:focus-within .integration-track { animation-play-state: paused !important; }
+@keyframes integration-drift { to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) {
+  .integration-track { animation: none; width: 100%; }
+  .integration-window { overflow-x: auto; mask-image: none; }
+  .integration-group[aria-hidden="true"] { display: none; }
+  .integration-strip-heading button { display: none; }
+}
+
+/* The hero keeps anatomy in view; response data belongs in Brain Lab. */
+@media (min-width: 1001px) {
+  .landing-hero { grid-template-columns: .95fr 1.1fr; gap: 0; padding-top: 44px; padding-bottom: 40px; }
+  .hero-observatory { height: 620px; margin-right: -4vw; margin-left: -2vw; }
+  .hero-observatory .brain-stage { height: 565px; }
+  .hero-observatory .label-bottom { left: 8%; right: 6%; bottom: 35px; }
+}
+.hero-observatory canvas { pointer-events: none; }
+.terminal-content .syntax-function { color: #89e4cd; }
+.terminal-content .syntax-argument { color: #f1c784; }
+.terminal-content .syntax-punctuation { color: #a9c0d5; }
+.terminal-bar > span:nth-child(1) { background: #d98c7d; }
+.terminal-bar > span:nth-child(2) { background: #d7b870; }
+.terminal-bar > span:nth-child(3) { background: #70b9a1; }
+.evidence-path { max-width: 1440px; margin: auto; padding: 36px 6% 76px; display: grid; grid-template-columns: 1fr 1.2fr; gap: 8%; }
+.evidence-path h2 { margin: 22px 0; font-size: clamp(30px, 3vw, 48px); line-height: 1.12; letter-spacing: -.045em; font-weight: 500; }
+.evidence-path > div > p { max-width: 350px; color: #6b7f88; font-size: 14px; line-height: 1.8; }
+.evidence-path-links { border-top: 1px solid #d8e4e7; }
+.evidence-path-links > a { display: flex; align-items: center; gap: 20px; padding: 23px 0; border-bottom: 1px solid #d8e4e7; text-decoration: none; color: #233f4b; transition: padding .2s; }
+.evidence-path-links > a:hover { padding-left: 8px; }
+.evidence-path-number { align-self: flex-start; font-family: monospace; font-size: 11px; color: #32848a; padding-top: 3px; }
+.evidence-path-links strong { font-size: 16px; font-weight: 550; }
+.evidence-path-links p { margin: 7px 0 0; font-size: 12px; line-height: 1.7; color: #6b7f88; }
+.evidence-path-links svg { flex-shrink: 0; margin-left: auto; color: #32848a; }
+@media (max-width: 700px) { .evidence-path { grid-template-columns: 1fr; padding: 12px 24px 50px; gap: 20px; } }
+[data-motion="reduced"] .integration-track { animation: none; width: 100%; }
+[data-motion="reduced"] .integration-group[aria-hidden="true"] { display: none; }
+[data-motion="reduced"] .integration-window { overflow-x: auto; mask-image: none; }

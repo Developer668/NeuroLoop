@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 from sqlalchemy import select
 from .config import settings
+from .persistence import close_mmap
 from .db import initialize,Session,Asset,Project,Run,Evaluation,Experiment,RunEvent,as_dict,uid
 from . import services,policy
 from .schemas import ProjectCreate,RunCreate,CreativeCreate,CompareRequest,TranscriptUpdate
@@ -165,10 +166,17 @@ def update_project(identity: str,body: ProjectCreate): return services.update_pr
 
 @app.get('/api/projects/{identity}')
 def project(identity: str):
-    with Session() as db:
-        row=db.get(Project,identity)
-        if not row: raise HTTPException(404,'Project not found')
-        return as_dict(row)
+    try:
+        return services.get_project(identity)
+    except services.DomainError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+@app.get('/api/projects/{identity}/context')
+def project_context(identity: str):
+    try:
+        return services.project_context(identity)
+    except services.DomainError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 @app.post('/api/assets',status_code=201)
 async def upload(file: UploadFile=File(...)):
@@ -270,10 +278,10 @@ async def stream(identity: str,request: Request):
 
 @app.get('/api/evaluations/{identity}')
 def evidence(identity: str):
-    with Session() as db:
-        row=db.get(Evaluation,identity)
-        if not row: raise HTTPException(404,'Evaluation not found')
-        return as_dict(row,('prediction_path',))
+    try:
+        return services.get_evidence(identity)
+    except services.DomainError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 @app.get('/api/evaluations/{identity}/frame')
 def neural_frame(identity: str,index: int=0,reference: str | None=None):
@@ -282,22 +290,26 @@ def neural_frame(identity: str,index: int=0,reference: str | None=None):
     path=Path(row.prediction_path).resolve()
     if not path.is_relative_to(s.data.resolve()): raise HTTPException(403,'Invalid managed result')
     array=np.load(path,mmap_mode='r',allow_pickle=False)
-    if not 0<=index<len(array): raise HTTPException(400,'Frame index is outside the saved prediction')
-    values=array[index];value_range=row.evidence['range']
-    if reference:
-        with Session() as db: baseline=db.get(Evaluation,reference)
-        if not baseline or not baseline.prediction_path: raise HTTPException(404,'Reference array not found')
-        if baseline.profile!=row.profile: raise HTTPException(409,'Difference requires matching model profiles')
-        if baseline.evidence['times']!=row.evidence['times']:
-            raise HTTPException(409,'Difference requires identical recorded timestamps; no implicit time warping is applied')
-        baseline_path=Path(baseline.prediction_path).resolve()
-        if not baseline_path.is_relative_to(s.data.resolve()): raise HTTPException(403,'Invalid managed result')
-        other=np.load(baseline_path,allow_pickle=False,mmap_mode='r')
-        if other.shape!=array.shape: raise HTTPException(409,'Difference requires matching array shapes')
-        delta=np.asarray(array)-np.asarray(other)
-        values=delta[index];value_range=[float(delta.min()),float(delta.max())]
-    return {'evaluation_id':identity,'reference_id':reference,'index':index,'time':row.evidence['times'][index],
-            'mesh':'fsaverage5','values':values.tolist(),'range':value_range}
+    other=None
+    try:
+        if not 0<=index<len(array): raise HTTPException(400,'Frame index is outside the saved prediction')
+        values=array[index];value_range=row.evidence['range']
+        if reference:
+            with Session() as db: baseline=db.get(Evaluation,reference)
+            if not baseline or not baseline.prediction_path: raise HTTPException(404,'Reference array not found')
+            if baseline.profile!=row.profile: raise HTTPException(409,'Difference requires matching model profiles')
+            if baseline.evidence['times']!=row.evidence['times']:
+                raise HTTPException(409,'Difference requires identical recorded timestamps; no implicit time warping is applied')
+            baseline_path=Path(baseline.prediction_path).resolve()
+            if not baseline_path.is_relative_to(s.data.resolve()): raise HTTPException(403,'Invalid managed result')
+            other=np.load(baseline_path,allow_pickle=False,mmap_mode='r')
+            if other.shape!=array.shape: raise HTTPException(409,'Difference requires matching array shapes')
+            delta=np.asarray(array)-np.asarray(other)
+            values=delta[index];value_range=[float(delta.min()),float(delta.max())]
+        return {'evaluation_id':identity,'reference_id':reference,'index':index,'time':row.evidence['times'][index],
+                'mesh':'fsaverage5','values':values.tolist(),'range':value_range}
+    finally:
+        close_mmap(other);close_mmap(array)
 
 @app.get('/api/geometry')
 def geometry():
@@ -344,8 +356,12 @@ def compare(body: CompareRequest):
     if len({x.profile for x in rows})!=1: raise HTTPException(409,'Cannot compare different evaluator profiles')
     if any(not x.prediction_path or not Path(x.prediction_path).is_file() for x in rows):
         raise HTTPException(409,'Comparison requires available cortical arrays for every selected evaluation')
-    arrays=[np.load(x.prediction_path,allow_pickle=False,mmap_mode='r') for x in rows]
-    return {'metric':METRIC,'evaluation_ids':body.evaluation_ids,'matrix':[[similarity(a,b) for b in arrays] for a in arrays],'meaning':'Predicted cortical-pattern similarity, not human preference.'}
+    arrays=[]
+    try:
+        arrays=[np.load(x.prediction_path,allow_pickle=False,mmap_mode='r') for x in rows]
+        return {'metric':METRIC,'evaluation_ids':body.evaluation_ids,'matrix':[[similarity(a,b) for b in arrays] for a in arrays],'meaning':'Predicted cortical-pattern similarity, not human preference.'}
+    finally:
+        for array in arrays:close_mmap(array)
 
 @app.get('/api/runs/{identity}/export')
 def export(identity: str):

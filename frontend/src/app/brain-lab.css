@@ -1,0 +1,164 @@
+.brain-selectors {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  margin-bottom: 20px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.brain-selectors .field {
+  margin: 0;
+}
+.brain-lab-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(300px, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.brain-lab-layout > * {
+  min-width: 0;
+}
+.brain-lab-layout .brain-stage {
+  height: 530px;
+}
+.brain-stimulus-pane video {
+  aspect-ratio: 16/10;
+  object-fit: contain;
+  max-height: 430px;
+}
+.brain-stimulus-pane audio {
+  width: 100%;
+  margin: 38px 0;
+}
+.brain-stimulus-pane {
+  position: sticky;
+  top: 20px;
+}
+.brain-time-help {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+  margin: 10px 0;
+}
+.brain-interactive .brain-display-controls {
+  left: 16px;
+  right: 16px;
+  bottom: 36px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+}
+.brain-interactive .brain-scale {
+  right: 18px;
+  bottom: 90px;
+  width: 180px;
+  font-size: 11px;
+  color: var(--ink);
+  background: var(--surface);
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.brain-interactive .brain-scale > i {
+  height: 9px;
+  margin: 7px 0;
+}
+.brain-interactive .brain-scale small {
+  font-size: 9px;
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+}
+.brain-palette {
+  position: absolute;
+  left: 18px;
+  top: 48px;
+  display: grid;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.brain-palette select {
+  font-size: 11px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: 6px;
+  padding: 6px;
+  max-width: 170px;
+}
+.brain-interactive .brain-stage-bottom {
+  font-size: 9px;
+}
+.brain-interactive .brain-mode-group button,
+.brain-interactive .hemisphere-toggle {
+  font-size: 11px;
+}
+.brain-interactive .brain-canvas {
+  background: radial-gradient(
+    ellipse at 50% 45%,
+    rgba(117, 132, 152, 0.13),
+    transparent 70%
+  );
+}
+.brain-cinematic .brain-canvas {
+  touch-action: pan-y;
+  pointer-events: none;
+}
+@media (max-width: 1100px) {
+  .brain-lab-layout {
+    grid-template-columns: minmax(0, 1.15fr) minmax(260px, 1fr);
+  }
+  .brain-interactive .brain-display-controls {
+    justify-content: flex-start;
+  }
+  .brain-interactive .brain-scale {
+    bottom: 115px;
+  }
+  .brain-lab-layout .brain-stage {
+    height: 490px;
+  }
+}
+@media (max-width: 800px) {
+  .brain-lab-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .brain-stimulus-pane {
+    position: static;
+    grid-row: 1;
+  }
+  .brain-selectors {
+    grid-template-columns: 1fr;
+  }
+  .brain-lab-layout .brain-stage {
+    height: 480px;
+  }
+  .brain-interactive .brain-scale {
+    bottom: 105px;
+  }
+  .brain-stimulus-pane video {
+    max-height: 280px;
+  }
+  .brain-interactive .brain-stage-bottom {
+    font-size: 8px;
+  }
+}
+
+.playback-transport { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:16px; }
+.playback-transport .field { margin:0; min-width:90px; }
+.brain-legend { max-width:260px; }
+.app-shell[data-theme="dark"] .brain-stage { background:#30353a; }
+@media(max-width:600px) { .playback-transport { align-items:stretch; flex-direction:column; } }
+
+.brain-selection-row { display:grid; grid-template-columns:1fr 1fr; gap:20px; margin:0 0 20px; }
+.brain-selection-row .field { margin:0; }
+.brain-controls input[type="range"] { appearance:none; -webkit-appearance:none; display:block; width:100%; height:6px; min-height:6px; padding:0; border:0; border-radius:99px; background:var(--line); cursor:pointer; margin:20px 0 14px; }
+.brain-controls input[type="range"]::-webkit-slider-thumb { appearance:none; width:18px; height:18px; border-radius:50%; background:#258f92; border:3px solid var(--surface); box-shadow:0 0 0 1px #258f92; }
+.brain-controls input[type="range"]::-moz-range-thumb { width:14px; height:14px; border-radius:50%; background:#258f92; border:3px solid var(--surface); }
+.brain-controls input[type="range"]:focus-visible { outline:2px solid #258f92; outline-offset:7px; }
+.neural-layout { align-items:start; }
+.neural-layout > .stack > .panel:first-child { align-self:start; }
+@media(max-width:760px) { .brain-selection-row { grid-template-columns:1fr; } }

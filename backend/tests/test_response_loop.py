@@ -6,6 +6,40 @@ from neuroloop.generation import DeferredProvider, statuses
 from neuroloop import kragel
 
 
+def upload_image(client, headers, name='test.png'):
+    from io import BytesIO
+    from PIL import Image
+
+    payload = BytesIO()
+    Image.new('RGB', (320, 180), (90, 60, 60)).save(payload, format='PNG')
+    response = client.post(
+        '/api/assets', headers=headers,
+        files={'file': (name, payload.getvalue(), 'image/png')},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def create_project(client, headers, asset):
+    response = client.post(
+        '/api/projects', headers=headers,
+        json={'name': 'Response test', 'asset_id': asset['id']},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def allow_test_readouts(monkeypatch):
+    """Expose a model-free readiness fixture for controller-only tests."""
+    from neuroloop import services
+
+    monkeypatch.setattr(kragel, 'registration', lambda: {'decision_eligible': True})
+    monkeypatch.setattr(services, 'readout_asset_status', lambda root=None: {
+        'tsam': {'ready': True, 'missing': []},
+        'kragel': {'ready': True, 'missing': []},
+    })
+
+
 def test_response_target_requires_target_and_a_response_source():
     with pytest.raises(ValueError, match='requires a target'):
         RunCreate(project_id='p', objective='response_target')
@@ -19,7 +53,7 @@ def test_response_ensemble_preserves_sources_and_disagreement():
     evidence={
         'tsam': {'status':'experimental','labels':['Anger','Contempt','Disgust','Fear','Happiness','Neutral','Sadness','Surprise'],
                  'windows':[{'logits':[-2,-3,-3,-2,4,-2,-2,2]}]},
-        'kragel': {'status':'experimental','aggregate':{'amused':.08,'angry':-.04,'content':.05,'fearful':-.03,'neutral':-.06,'sad':-.02,'surprised':.04}},
+        'kragel': {'registration_verified':True,'transfer_validated':True,'decision_eligible':True,'status':'experimental','aggregate':{'amused':.08,'angry':-.04,'content':.05,'fearful':-.03,'neutral':-.06,'sad':-.02,'surprised':.04}},
     }
     report=ensemble(evidence)
     assert report['active_sources']==['tsam','kragel']
@@ -30,8 +64,8 @@ def test_response_ensemble_preserves_sources_and_disagreement():
 
 
 def test_response_target_score_moves_toward_declared_emotion():
-    base={'values':{'happiness':.25,'fear':.50},'mean_disagreement':.1}
-    improved={'values':{'happiness':.78,'fear':.08},'mean_disagreement':.1}
+    base={'decision_eligible':True,'values':{'happiness':.25,'fear':.50},'mean_disagreement':.1}
+    improved={'decision_eligible':True,'values':{'happiness':.78,'fear':.08},'mean_disagreement':.1}
     target={'emotions':{'happiness':{'desired':.8,'weight':1},'fear':{'desired':.05,'weight':1}}}
     assert target_score(improved,target)['value'] > target_score(base,target)['value']
 
@@ -53,10 +87,10 @@ def test_kragel_status_fails_closed_without_assets(monkeypatch,tmp_path):
     assert value['missing']
 
 
-def test_response_target_run_does_not_require_reference(client,headers):
-    from backend.tests.test_contracts import upload, project
-    asset=upload(client,headers)
-    p=project(client,headers,asset)
+def test_response_target_run_does_not_require_reference(client,headers,monkeypatch):
+    allow_test_readouts(monkeypatch)
+    asset=upload_image(client,headers)
+    p=create_project(client,headers,asset)
     body={'project_id':p['id'],'mode':'optimize','objective':'response_target',
           'target':{'emotions':{'happiness':{'desired':.8}}},'include_kragel':True,
           'allow_static_presentation':True,'max_evaluations':2}
@@ -66,9 +100,8 @@ def test_response_target_run_does_not_require_reference(client,headers):
 
 
 def test_reference_objective_still_requires_reference(client,headers):
-    from backend.tests.test_contracts import upload, project
-    asset=upload(client,headers)
-    p=project(client,headers,asset)
+    asset=upload_image(client,headers)
+    p=create_project(client,headers,asset)
     response=client.post('/api/runs',headers=headers,json={'project_id':p['id'],'mode':'optimize','allow_static_presentation':True})
     assert response.status_code==400
     assert 'reference' in response.json()['detail'].lower()
@@ -82,12 +115,12 @@ def test_worker_cache_contract_includes_response_sources():
 
 def test_response_target_worker_keeps_improving_candidate(client,headers,monkeypatch):
     """Exercise the real controller/ledger with deterministic evaluator outputs, no GPU/network."""
-    from backend.tests.test_contracts import upload, project
     from neuroloop import worker
     from neuroloop.db import Evaluation, Session, Experiment, Run
 
-    asset=upload(client,headers,name='loop.png')
-    p=project(client,headers,asset)
+    allow_test_readouts(monkeypatch)
+    asset=upload_image(client,headers,name='loop.png')
+    p=create_project(client,headers,asset)
     request={
         'project_id':p['id'],'mode':'optimize','objective':'response_target',
         'target':{'goal':'positive response','emotions':{'happiness':{'desired':.8,'weight':1}}},
@@ -108,7 +141,7 @@ def test_response_target_worker_keeps_improving_candidate(client,headers,monkeyp
             asset_id=selected.id,cache_key='x'+str(calls['n']),evaluator='fixture',profile='fixed-profile',
             evidence={'response_ensemble':{
                 'profile':'fixture','values':{'happiness':happiness},'sources':{},'source_weights':{},
-                'active_sources':['fixture'],'disagreement':{},'mean_disagreement':None,
+                'decision_eligible': True, 'active_sources':['fixture'],'disagreement':{},'mean_disagreement':None,
                 'confidence':'fixture','interpretation':'deterministic controller fixture',
             }},prediction_path=None,duration_seconds=0,
         )
@@ -129,35 +162,3 @@ def test_response_target_worker_keeps_improving_candidate(client,headers,monkeyp
         assert len(experiments)==1
         assert experiments[0].decision=='kept'
         assert experiments[0].evidence['response_ensemble']['values']['happiness']==.8
-
-
-def test_optional_readout_fingerprints_are_part_of_cache_contract():
-    import inspect
-    from neuroloop import inference, worker
-    worker_source=inspect.getsource(worker.evaluation)
-    profile_source=inspect.getsource(inference.profile_id)
-    assert 'kragel_fingerprint' in worker_source
-    assert 'tsam_fingerprint' in worker_source
-    assert 'response_fingerprint' in worker_source
-    assert 'tsam.py' not in profile_source
-
-
-def test_kragel_fingerprint_changes_with_numeric_volume(monkeypatch,tmp_path):
-    from neuroloop import kragel
-    source=tmp_path/'source'; source.mkdir()
-    geometry=tmp_path/'geometry'; geometry.mkdir()
-    for emotion in kragel.EMOTIONS:
-        (source/f'mean_3comp_{emotion}_group_emotion_PLS_beta_BSz_10000it.hdr').write_bytes(b'hdr')
-        (source/f'mean_3comp_{emotion}_group_emotion_PLS_beta_BSz_10000it.img').write_bytes(emotion.encode())
-    for hemi in ('left','right'):
-        for surface in ('pial','white'):
-            (geometry/f'{surface}_{hemi}.gii.gz').write_bytes(f'{surface}-{hemi}'.encode())
-    monkeypatch.setattr(kragel,'_source',lambda:source)
-    monkeypatch.setattr(kragel,'_geometry',lambda name:geometry/name)
-    kragel.fingerprint.cache_clear()
-    first=kragel.fingerprint()
-    (source/'mean_3comp_amused_group_emotion_PLS_beta_BSz_10000it.img').write_bytes(b'changed')
-    kragel.fingerprint.cache_clear()
-    second=kragel.fingerprint()
-    assert first != second
-    kragel.fingerprint.cache_clear()

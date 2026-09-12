@@ -9,9 +9,12 @@ compiled Python from Jessylg27 were used. That repository's public README and JS
 metadata were read to identify its intended profile; this is not a malware verdict.
 
 This independent build follows the same scope: original TRIBE brain checkpoint,
-INT8 V-JEPA2 ViT-G video backbone, 2 Hz video sampling (corrected to match audio/text), batch-size setting 4,
+INT8 V-JEPA2 ViT-G video backbone, 2 Hz video sampling (corrected to match audio/text),
 and 64 frames per clip. Audio and text are unchanged and are **not bundled**.
-Neuralset 0.0.2 processes native video clips individually despite that batch setting.
+The laptop-safe defaults are feature batch size 1, dataset batch size 1, and zero
+data-loader workers. This reduces prefetch and intermediate tensor pressure at the
+cost of throughput; it does not change checkpoint, feature, or output shapes.
+Neuralset 0.0.2 processes native video clips individually.
 
 ## Contents and source
 
@@ -63,6 +66,27 @@ other assets downloaded by TRIBE. The official Llama-3.2-3B text model requires
 Hugging Face access approval/authentication. Full multimodal inference was not
 tested and may exceed 12 GB VRAM; this is not a fully offline all-modalities bundle.
 
+### Apple MPS memory behavior
+
+When the installed SafeTensors runtime exposes its `pread` backend, the loader
+reads the quantized video checkpoint directly onto MPS with `backend='pread'`.
+That avoids the default mmap-backed file view plus a second CPU-to-MPS model copy
+that can be costly in Apple Silicon unified memory. Older SafeTensors runtimes
+fall back to the previous CPU load followed by `model.to(device)`, preserving
+compatibility rather than requiring a dependency upgrade.
+
+The loader keeps the existing BF16 input path, INT8 linear weights, FP32 scales,
+and CPU FP32 feature output. It does not introduce a lower-precision model or
+alter the checkpoint. Input frames are released immediately after the forward
+pass. The shipped TRIBE config consumes a group mean over the final 25% of
+V-JEPA layers, so the wrapper computes that mean in FP32 and transfers only the
+compact result instead of materializing a host-side FP32 copy of every hidden
+layer. V-JEPA still creates its internal hidden states during the forward pass;
+peak host RAM and native MPS allocator behavior therefore require a guarded real-device measurement. The model-free contract tests do not establish an
+end-to-end memory ceiling.
+
+SafeTensors backend reference: https://github.com/safetensors/safetensors/blob/main/bindings/python/py_src/safetensors/torch.py
+
 ## Format and validation
 
 Linear weights are prepared in BF16, then symmetrically quantized per output row
@@ -100,4 +124,4 @@ checkout at `D:\NeuroLoop\tribev2-main`; keep that folder in place.
 The original video files are retained, so total folder size is larger than the
 quantized distribution. Large weights, environments, and caches are ignored by Git.
 
-Multimodal correction: all modalities now retain TRIBE's shared 2 Hz grid. The earlier video-only 1.5 Hz setting was incompatible with multimodal concatenation. Video intermediates move to CPU before pooling; audio uses CPU in the application. Older JSON reports document their original test configuration; current application checks are under ../data/verification.
+Multimodal correction: all modalities now retain TRIBE's shared 2 Hz grid. The earlier video-only 1.5 Hz setting was incompatible with multimodal concatenation. The configured video layer-group mean is compacted before CPU token pooling; audio uses CPU in the application. Older JSON reports document their original test configuration; current application checks are under ../data/verification.

@@ -29,6 +29,13 @@ def test_missing_telemetry_fails_closed():
     assert guard.pressure_reason({'gpu':None})
 
 
+def test_mps_reserve_has_hard_floor(monkeypatch):
+    monkeypatch.setattr(guard.sys, 'platform', 'darwin')
+    monkeypatch.setenv('NEUROLOOP_ALLOW_MPS_INFERENCE', 'true')
+    monkeypatch.setenv('NEUROLOOP_MPS_MEMORY_RESERVE_GIB', '0.25')
+    assert guard.memory_reserve_bytes() == int(1.5 * 1024**3)
+
+
 def test_queue_entry_is_blocked_before_project_or_gpu_work(client,headers):
     from neuroloop.config import settings
     path=settings().data/'inference-quarantine.json'

@@ -1,16 +1,21 @@
 """Offline smoke checks and conservative surface-compatibility inspection."""
 import gc
 import json
+import sys
 import tarfile
 from pathlib import Path
-import nibabel as nib
-import numpy as np
-import torch
-from transformers import AutoModel, AutoTokenizer, AutoFeatureExtractor, AutoImageProcessor
 
 ROOT = Path(__file__).resolve().parent
 
 def main():
+    sys.path.insert(0, str(ROOT.parent / 'backend'))
+    from neuroloop.hardware import require_inference_headroom
+    require_inference_headroom()
+    import nibabel as nib
+    import numpy as np
+    import torch
+    from transformers import AutoModel, AutoTokenizer, AutoFeatureExtractor, AutoImageProcessor
+
     torch.set_num_threads(6)
     results = {}
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -27,7 +32,8 @@ def main():
                           'quantized_4bit': bool(getattr(model, 'is_loaded_in_4bit', False))}
     assert results['llama_q4']['quantized_4bit']
     del model, out, inputs
-    gc.collect(); torch.cuda.empty_cache()
+    gc.collect()
+    if device == 'cuda': torch.cuda.empty_cache()
     print('Llama Q4 passed', flush=True)
     for key, folder in [('w2v_bert', 'audio/w2v-bert-2.0'), ('dinov2', 'vision/dinov2-large')]:
         path = ROOT / folder
@@ -45,7 +51,8 @@ def main():
         results[key] = {'passed': True, 'shape': list(out.last_hidden_state.shape), 'hidden_states': len(out.hidden_states)}
         print(key, 'passed', flush=True)
         del model, out, inputs
-        gc.collect(); torch.cuda.empty_cache()
+        gc.collect()
+        if device == 'cuda': torch.cuda.empty_cache()
     results['tsam'] = {}
     for name in ['backbone_weights.tar', 'tsam_weights.tar']:
         path = ROOT / 'emotion/tsam/weights' / name

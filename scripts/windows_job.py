@@ -1,9 +1,12 @@
-"""Own the complete service process tree on Windows, including inference children."""
+"""Own the complete service process tree on Windows and POSIX."""
 import os
+import signal
+import subprocess
 
 class OwnedJob:
     def __init__(self):
         self.handle = None
+        self.groups = {}
         if os.name != 'nt':
             return
         import ctypes
@@ -44,8 +47,59 @@ class OwnedJob:
             import ctypes
             if not self.kernel.AssignProcessToJobObject(self.handle, int(process._handle)):
                 raise ctypes.WinError(ctypes.get_last_error())
-
+        elif os.name != 'nt':
+            try:
+                self.groups[process.pid] = os.getpgid(process.pid)
+            except ProcessLookupError:
+                pass
     def close(self):
         if self.handle:
             self.kernel.CloseHandle(self.handle)
             self.handle = None
+
+    def terminate(self, process, timeout=10):
+        """Stop a process and all descendants owned by its isolated group."""
+        group = None
+        owned_group = False
+        if os.name != 'nt':
+            group = self.groups.pop(process.pid, None)
+            try:
+                group = os.getpgid(process.pid) if group is None else group
+            except ProcessLookupError:
+                pass
+            # The supervisor must never signal its own process group. The
+            # worker starts run children with start_new_session=True below.
+            owned_group = group is not None and group != os.getpgrp()
+            if owned_group:
+                try:
+                    os.killpg(group, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+            else:
+                process.terminate()
+        else:
+            # Closing the job applies KILL_ON_JOB_CLOSE to the full tree.
+            self.close()
+            if process.poll() is None:
+                process.terminate()
+
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            if owned_group:
+                try:
+                    os.killpg(group, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=5)
+        finally:
+            # The group leader can exit while a descendant ignores SIGTERM.
+            # Escalate the still-owned group even when process.wait() did not
+            # time out, otherwise an orphan can survive the supervisor.
+            if owned_group:
+                try:
+                    os.killpg(group, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass

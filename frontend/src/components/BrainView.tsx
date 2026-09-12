@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Download, ChevronRight, Layers, Info } from "lucide-react";
 import dynamic from "next/dynamic";
+import "../app/brain-lab.css";
 const BrainCanvas = dynamic(() => import("./BrainCanvas"), { ssr: false });
 import { Panel, Empty, AssetVisual, Badge, errorText, dateText } from "./UI";
 import { AnatomicalReadout, TSAMReadout, KragelReadout, ResponseEnsembleReadout } from "./BrainReadouts";
@@ -26,10 +27,14 @@ export default function BrainView({
     [detail, setDetail] = useState<Evaluation | null>(null),
     [error, setError] = useState("");
   const video = useRef<HTMLVideoElement>(null);
+  const audio = useRef<HTMLAudioElement>(null);
   const pendingSeek = useRef<number | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState(1);
   const identity = selected || evaluations[0]?.id || "";
   useEffect(() => {
     setFrame(0);
+    setPlaying(false);
     setDetail(null);
     setError("");
     setReference("");
@@ -64,13 +69,64 @@ export default function BrainView({
   }, [detail?.asset_id, knownAsset?.id]);
   const asset = knownAsset || archivedAsset;
   const ev = detail?.evidence;
+  useEffect(() => {
+    const media = video.current || audio.current;
+    if (media) media.playbackRate = speed;
+  }, [speed, asset?.id]);
+  useEffect(() => {
+    if (!playing || !ev || asset?.kind === "video" || asset?.kind === "audio") return;
+    const next = frame + 1;
+    if (next >= ev.times.length) { setPlaying(false); return; }
+    const timer = window.setTimeout(() => setFrame(next),
+      Math.max(20, (ev.times[next] - ev.times[frame]) * 1000 / speed));
+    return () => window.clearTimeout(timer);
+  }, [playing, frame, speed, ev, asset?.kind]);
+  async function togglePlayback() {
+    const media = video.current || audio.current;
+    if (playing) { media?.pause(); setPlaying(false); return; }
+    if (frame >= (ev?.times.length || 1) - 1) selectFrame(0);
+    try {
+      if (media) { media.playbackRate = speed; await media.play(); }
+      setPlaying(true);
+    } catch (e) { setError(errorText(e)); }
+  }
   function selectFrame(index: number) {
     setFrame(index);
-    if (video.current && ev?.times[index] !== undefined) {
-      pendingSeek.current = ev.times[index];
-      if (video.current.readyState >= 1)
-        video.current.currentTime = ev.times[index];
+    const media = video.current || audio.current;
+    if (media && ev?.times[index] !== undefined) {
+      const target = Number.isFinite(media.duration)
+        ? Math.min(ev.times[index], media.duration)
+        : ev.times[index];
+      pendingSeek.current = target;
+      if (media.readyState >= 1) media.currentTime = target;
     }
+  }
+  function seekWhenReady() {
+    const media = video.current || audio.current;
+    if (media && pendingSeek.current !== null) {
+      const target = Math.min(pendingSeek.current, media.duration);
+      if (Number.isFinite(target)) {
+        pendingSeek.current = target;
+        media.currentTime = target;
+      }
+    }
+  }
+  function syncMediaTime() {
+    const media = video.current || audio.current;
+    if (!media || !ev?.times.length) return;
+    if (pendingSeek.current !== null) {
+      if (Math.abs(media.currentTime - pendingSeek.current) > 0.15) return;
+      pendingSeek.current = null;
+    }
+    let nearest = 0;
+    for (let i = 1; i < ev.times.length; i++) {
+      if (
+        Math.abs(ev.times[i] - media.currentTime) <
+        Math.abs(ev.times[nearest] - media.currentTime)
+      )
+        nearest = i;
+    }
+    setFrame(nearest);
   }
   function exportEvidence() {
     if (!detail) return;
@@ -110,15 +166,7 @@ export default function BrainView({
           </button>
         </div>
       )}
-      <div className="neural-layout">
-        <div className="stack">
-          <Panel
-            title="Cortical surface"
-            action={
-              <Badge value={detail ? "model_prediction" : "anatomy_only"} />
-            }
-          >
-            <div className="panel-body" style={{ paddingBottom: 0 }}>
+            <div className="brain-selection-row">
               <label className="field">
                 <span>Saved evaluation</span>
                 <select
@@ -173,6 +221,14 @@ export default function BrainView({
                 </label>
               )}
             </div>
+      <div className="neural-layout">
+        <div className="stack">
+          <Panel
+            title="Cortical surface"
+            action={
+              <Badge value={detail ? "model_prediction" : "anatomy_only"} />
+            }
+          >
             <BrainCanvas
               key={identity || "anatomy"}
               evaluationId={identity || undefined}
@@ -181,15 +237,26 @@ export default function BrainView({
             />
             {ev && (
               <div className="brain-controls">
+                <div className="playback-transport">
+                  <button className="button primary" onClick={togglePlayback} disabled={!asset}>
+                    {playing ? "Pause stimulus & brain" : "Play stimulus & brain"}
+                  </button>
+                  <label className="field"><span>Playback speed</span>
+                    <select aria-label="Playback speed" value={speed} onChange={e => setSpeed(Number(e.target.value))}>
+                      <option value={0.5}>0.5×</option><option value={1}>1×</option><option value={2}>2×</option>
+                    </select>
+                  </label>
+                </div>
                 <label className="field">
                   <span>
-                    Response time: {ev.times[frame]?.toFixed(1)} seconds
+                    Stimulus time: {ev.times[frame]?.toFixed(1)} seconds
                   </span>
                   <input
                     aria-label="Neural response time"
                     type="range"
                     min={0}
-                    max={ev.times.length - 1}
+                    max={Math.max(0, ev.times.length - 1)}
+                    disabled={ev.times.length < 2}
                     step={1}
                     value={frame}
                     onChange={(e) => selectFrame(Number(e.target.value))}
@@ -232,7 +299,6 @@ export default function BrainView({
                   {asset.kind === "video" ? (
                     <video
                       ref={video}
-                      controls
                       preload="metadata"
                       src={`/api/assets/${asset.id}/content`}
                       style={{
@@ -240,34 +306,40 @@ export default function BrainView({
                         borderRadius: 6,
                         background: "#151b1c",
                       }}
-                      onLoadedMetadata={() => {
-                        if (video.current && pendingSeek.current !== null)
-                          video.current.currentTime = pendingSeek.current;
-                      }}
+                      onLoadedMetadata={seekWhenReady}
                       onPointerDown={() => {
                         pendingSeek.current = null;
                       }}
                       onKeyDown={() => {
                         pendingSeek.current = null;
                       }}
-                      onTimeUpdate={() => {
-                        if (!ev || !video.current) return;
-                        const time = video.current.currentTime;
-                        // Ignore the previous media time while a cortical-slider seek is pending.
-                        if (pendingSeek.current !== null) {
-                          if (Math.abs(time - pendingSeek.current) > 0.15)
-                            return;
-                          pendingSeek.current = null;
-                        }
-                        let nearest = 0;
-                        for (let i = 0; i < ev.times.length; i++)
-                          if (
-                            Math.abs(ev.times[i] - time) <
-                            Math.abs(ev.times[nearest] - time)
-                          )
-                            nearest = i;
-                        setFrame(nearest);
+                      onTimeUpdate={syncMediaTime}
+                      onEnded={() => setPlaying(false)}
+                      onPause={() => setPlaying(false)}
+                      onPlay={() => setPlaying(true)}
+                    />
+                  ) : asset.kind === "audio" ? (
+                    <audio
+                      ref={audio}
+                      preload="metadata"
+                      src={`/api/assets/${asset.id}/content`}
+                      onLoadedMetadata={seekWhenReady}
+                      onTimeUpdate={syncMediaTime}
+                      onEnded={() => setPlaying(false)}
+                      onPause={() => setPlaying(false)}
+                      onPlay={() => setPlaying(true)}
+                      onPointerDown={() => {
+                        pendingSeek.current = null;
                       }}
+                      onKeyDown={() => {
+                        pendingSeek.current = null;
+                      }}
+                    />
+                  ) : asset.kind === "image" ? (
+                    <img
+                      src={`/api/assets/${asset.id}/content`}
+                      alt={asset.name}
+                      style={{ width: "100%", height: "auto", display: "block", objectFit: "contain", borderRadius: 6 }}
                     />
                   ) : (
                     <AssetVisual asset={asset} play />
@@ -276,7 +348,7 @@ export default function BrainView({
                     {asset.name}
                   </div>
                   <small>
-                    {asset.kind} · {size(asset.size)}
+                    Playback follows the shared Brain Lab transport. {asset.kind} · {size(asset.size)}
                   </small>
                 </div>
               </>
@@ -318,6 +390,15 @@ export default function BrainView({
                 <div>
                   <dt>Transcript</dt>
                   <dd>{ev?.transcript_source || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Feature plan</dt>
+                  <dd>
+                    {ev?.model_selection?.models_loaded
+                      ?.filter((model) => model.role !== "brain_readout")
+                      .map((model) => model.name)
+                      .join(", ") || "—"}
+                  </dd>
                 </div>
                 <div>
                   <dt>Output shape</dt>

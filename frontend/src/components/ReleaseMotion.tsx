@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { BackgroundPaths } from "@/components/ui/background-paths";
 import { useEffect, useRef, useState } from "react";
 import {
   motion,
@@ -7,10 +8,7 @@ import {
   useReducedMotion,
   useScroll,
   useTransform,
-  useMotionValue,
-  useSpring,
 } from "motion/react";
-import { ArrowUpRight } from "lucide-react";
 
 export function PixelLoading({
   label = "Reading evidence",
@@ -48,51 +46,10 @@ export function PixelLoading({
   );
 }
 
-export function BackgroundPaths() {
-  const reduce = useReducedMotion();
-  const ref = useRef<HTMLDivElement>(null);
-  const visible = useInView(ref);
-  return (
-    <div ref={ref} className="background-paths" aria-hidden="true">
-      <svg viewBox="0 0 696 316" fill="none">
-        {[-1, 1].flatMap((position) =>
-          Array.from({ length: 24 }, (_, i) => (
-            <motion.path
-              key={`${position}-${i}`}
-              d={`M-${380 - i * 5 * position} -${189 + i * 6}C-${380 - i * 5 * position} -${189 + i * 6} -${312 - i * 5 * position} ${216 - i * 6} ${152 - i * 5 * position} ${343 - i * 6}C${616 - i * 5 * position} ${470 - i * 6} ${684 - i * 5 * position} ${875 - i * 6} ${684 - i * 5 * position} ${875 - i * 5}`}
-              stroke="currentColor"
-              strokeWidth={0.6 + i * 0.025}
-              initial={false}
-              animate={
-                reduce || !visible
-                  ? { opacity: 0.25 }
-                  : {
-                      pathLength: [0.35, 1, 0.35],
-                      pathOffset: [0, 1, 0],
-                      opacity: [0.12, 0.4, 0.12],
-                    }
-              }
-              transition={{
-                duration: 22 + i * 0.5,
-                repeat: Infinity,
-                ease: "linear",
-              }}
-            />
-          )),
-        )}
-      </svg>
-    </div>
-  );
-}
-
 export function MotionFooter() {
   const ref = useRef<HTMLElement>(null);
   const reduce = useReducedMotion();
   const visible = useInView(ref, { margin: "100px" });
-  const mx = useMotionValue(0),
-    my = useMotionValue(0);
-  const x = useSpring(mx, { stiffness: 160, damping: 18 }),
-    magneticY = useSpring(my, { stiffness: 160, damping: 18 });
   const { scrollYProgress } = useScroll({
     target: ref,
     offset: ["start end", "end end"],
@@ -118,28 +75,6 @@ export function MotionFooter() {
             <em>Go further.</em>
           </h2>
         </div>
-        <motion.div
-          style={reduce ? undefined : { x, y: magneticY }}
-          onPointerMove={(event) => {
-            if (reduce || event.pointerType !== "mouse") return;
-            const r = event.currentTarget.getBoundingClientRect();
-            mx.set((event.clientX - r.left - r.width / 2) * 0.12);
-            my.set((event.clientY - r.top - r.height / 2) * 0.12);
-          }}
-          onPointerLeave={() => {
-            mx.set(0);
-            my.set(0);
-          }}
-        >
-          <Link className="footer-magnetic" href="/workspace">
-            <ArrowUpRight size={38} />
-            <span>
-              Open your
-              <br />
-              workspace
-            </span>
-          </Link>
-        </motion.div>
       </div>
       <div className="footer-marquee" aria-hidden="true">
         <div>
@@ -161,7 +96,7 @@ export function MotionFooter() {
           <Link href="/workspace?view=research">Research & methodology ↗</Link>
         </nav>
         <nav aria-label="Footer connections">
-          <Link href="/neuro">Meet Neuro ↗</Link>
+          <Link href="/neuro">Meet Neuro AI ↗</Link>
           <Link href="/workspace?view=connections">Connect your agent ↗</Link>
           <a href="#top">Back to top ↑</a>
         </nav>

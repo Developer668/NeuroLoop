@@ -32,7 +32,7 @@ def check_connections() -> dict:
     results.extend([
       {'name':'W&B Inference','status':'configured_not_tested' if key and s.planner_enabled else 'not_configured','detail':'Optional bounded experiment proposals. A model call requires its API key and planner enablement; no paid call is made by a connection check.'},
       launch_status(),
-      {'name':'CoreWeave','status':'not_used_local_compute','detail':'This installation uses the laptop GPU. Cloud compute is deferred as requested.'},
+      {'name':'CoreWeave','status':'not_used_local_compute','detail':'Model computation stays on this computer. GPU jobs honor the execution hold; bounded CPU verification is separate. CoreWeave compute is deferred.'},
       {'name':'TypeSafe','status':'disabled','detail':'Deferred by the project requirements. No TypeSafe model or service is invoked.'},
     ])
     from .db import now

@@ -13,12 +13,22 @@ def main():
     proposal=get_proposal(identity)
     if proposal['status'] not in {'approved','queued'}:raise ValueError('Proposal has not been approved locally')
     remote=wandb.init(settings=wandb.Settings(disable_git=True,disable_code=True,disable_job_creation=True,x_disable_stats=True,console='off'))
-    run=execute(identity,proposal['approval_digest'])
     target=ROOT/'data/verification/release';target.mkdir(parents=True,exist_ok=True)
-    receipt={'version':1,'proposal_id':identity,'local_run_id':run['id'],'wandb_run_id':remote.id,'url':remote.url,'status':'running'}
+    run=None
+    receipt={'version':1,'proposal_id':identity,'wandb_run_id':remote.id,'url':remote.url,'status':'starting'}
     destination=target/('launch-'+identity+'.json')
     atomic_json(destination,receipt)
     try:
+        run=execute(identity,proposal['approval_digest'])
+        receipt.update(local_run_id=run['id'],status='running')
+        atomic_json(destination,receipt)
+        from neuroloop.execution_guard import cpu_verification_enabled
+        if cpu_verification_enabled():
+            import subprocess
+            from neuroloop.config import settings
+            command=[str(settings().model_python),str(ROOT/'scripts/run_owned_cpu.py'),'--run-id',run['id'],'--proposal-id',identity]
+            child=subprocess.run(command,stdin=subprocess.DEVNULL,timeout=660)
+            if child.returncode:raise RuntimeError('Owned CPU experiment did not complete')
         deadline=time.monotonic()+960
         while time.monotonic()<deadline:
             run=services.get_run(run['id'])
@@ -39,7 +49,8 @@ def main():
         receipt['remote_status']='confirmed';atomic_json(destination,receipt)
         if run['status']!='completed':raise RuntimeError(run.get('error') or run['status'])
     except BaseException as exc:
-        services.cancel_run(run['id']);remote.finish(exit_code=1)
+        if run is not None:services.cancel_run(run['id'])
+        remote.finish(exit_code=1)
         receipt.update(error=type(exc).__name__)
         atomic_json(destination,receipt);raise
 

@@ -1,20 +1,20 @@
 "use client";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowUpRight,
   ArrowRight,
   AudioLines,
   FileText,
   Film,
-  MoveUpRight,
   Braces,
   Check,
   ScanLine,
 } from "lucide-react";
 import { Brand } from "./UI";
 import { MotionFooter } from "./ReleaseMotion";
+import { IntegrationStrip } from "./IntegrationStrip";
 const BrainCanvas = dynamic(() => import("./BrainCanvas"), {
   ssr: false,
   loading: () => (
@@ -23,6 +23,7 @@ const BrainCanvas = dynamic(() => import("./BrainCanvas"), {
 });
 export default function Landing() {
   const root = useRef<HTMLElement>(null);
+  const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     const nodes = root.current?.querySelectorAll("[data-reveal]");
     const observer = new IntersectionObserver(
@@ -36,12 +37,63 @@ export default function Landing() {
       { threshold: 0.12 },
     );
     nodes?.forEach((node) => observer.observe(node));
-    return () => observer.disconnect();
+    // Scroll-aware nav: condense into a deeper glass bar once the page moves.
+    const onScroll = () => setScrolled(window.scrollY > 12);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    // Pointer-tracked spotlight in the hero observatory (fine pointers only,
+    // never when the visitor prefers reduced motion).
+    const hero = root.current?.querySelector<HTMLElement>(".landing-hero");
+    const fine =
+      window.matchMedia("(hover: hover) and (pointer: fine)").matches &&
+      !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const onMove = (event: PointerEvent) => {
+      if (!hero) return;
+      const rect = hero.getBoundingClientRect();
+      hero.style.setProperty("--mx", `${event.clientX - rect.left}px`);
+      hero.style.setProperty("--my", `${event.clientY - rect.top}px`);
+    };
+    if (fine && hero) hero.addEventListener("pointermove", onMove);
+    // Eased count-up for the observatory readouts. The markup already ships
+    // the final values, so hydration stays stable; we only animate when the
+    // visitor allows motion.
+    const counters = root.current?.querySelectorAll<HTMLElement>(
+      "[data-count-to]",
+    );
+    let raf = 0;
+    if (
+      counters?.length &&
+      !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      const started = performance.now();
+      const duration = 1600;
+      const tick = (now: number) => {
+        const t = Math.min(1, (now - started) / duration);
+        const eased = 1 - Math.pow(1 - t, 3);
+        counters.forEach((node) => {
+          const target = Number(node.dataset.countTo || "0");
+          const pad = Number(node.dataset.countPad || "0");
+          const value = Math.round(target * eased);
+          const label = pad
+            ? String(value).padStart(pad, "0")
+            : value.toLocaleString("en-US");
+          if (node.firstChild) node.firstChild.textContent = label;
+        });
+        if (t < 1) raf = requestAnimationFrame(tick);
+      };
+      raf = requestAnimationFrame(tick);
+    }
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("scroll", onScroll);
+      if (fine && hero) hero.removeEventListener("pointermove", onMove);
+      cancelAnimationFrame(raf);
+    };
   }, []);
   return (
     <main className="landing" ref={root} id="top">
       <div className="reading-progress" aria-hidden="true" />
-      <nav className="landing-nav">
+      <nav className={"landing-nav" + (scrolled ? " scrolled" : "")}>
         <Brand />
         <div className="landing-nav-links">
           <a href="#how-it-works">How it works</a>
@@ -55,10 +107,7 @@ export default function Landing() {
       <section className="landing-hero">
         <div className="hero-copy-new" data-reveal>
           <span className="eyebrow">THE CREATIVE EXPERIMENT ENGINE</span>
-          <h1>
-            Great creative.
-            <br />A closer <span>look.</span>
-          </h1>
+          <h1>Great creative.<br /><span>A closer look.</span></h1>
           <p>
             Explore how your creative is predicted to engage the cortex. Test a
             deliberate change. Follow the evidence to your next version.
@@ -95,16 +144,16 @@ export default function Landing() {
           <div className="orbit-label label-top">THE CORTICAL OBSERVATORY</div>
           <BrainCanvas publicMesh cinematic />
           <div className="orbit-label label-bottom">
-            <span>
+            <span data-count-to="20484">
               20,484<small>surface vertices</small>
             </span>
-            <span>
+            <span data-count-to="2" data-count-pad="2">
               02<small>hemispheres</small>
             </span>
             <ScanLine size={22} />
           </div>
           <span className="observatory-note">
-            Anatomical surface · drag to explore
+            Anatomical reference · fsaverage5 cortical surface
           </span>
         </div>
       </section>
@@ -127,13 +176,13 @@ export default function Landing() {
         <div className="section-intro" data-reveal>
           <span className="eyebrow">A CLEARER WAY FORWARD</span>
           <h2>
-            From a good instinct
+            Keep the original.
             <br />
-            to a considered decision.
+            Question the next version.
           </h2>
           <p>
-            A focused loop for creative work. Start with what you have. Change
-            what you can explain.
+            One original. One deliberate change. A record of what happened.
+            Compare predictions on the same basis before deciding what to keep.
           </p>
         </div>
         <div className="process-steps">
@@ -204,6 +253,18 @@ export default function Landing() {
           </article>
         </div>
       </section>
+      <section className="evidence-path" aria-labelledby="evidence-path-title" data-reveal>
+        <div>
+          <span className="eyebrow">FOLLOW THE EVIDENCE</span>
+          <h2 id="evidence-path-title">One experiment.<br />Three ways to inspect it.</h2>
+          <p>Move from a moment in the creative to the complete record of the run.</p>
+        </div>
+        <div className="evidence-path-links">
+          <Link href="/workspace?view=brain"><span className="evidence-path-number">01</span><div><strong>The response</strong><p>Explore the predicted cortical surface and its timeline in Brain Lab.</p></div><ArrowUpRight size={19} /></Link>
+          <Link href="/workspace?view=research"><span className="evidence-path-number">02</span><div><strong>The comparison</strong><p>Inspect saved evaluations, charts and the local research ledger.</p></div><ArrowUpRight size={19} /></Link>
+          <Link href="/workspace?view=connections"><span className="evidence-path-number">03</span><div><strong>The execution</strong><p>Review integration status and connect your agent to the same services.</p></div><ArrowUpRight size={19} /></Link>
+        </div>
+      </section>
       <section className="agent-section" id="for-agents">
         <div data-reveal>
           <span className="eyebrow">YOUR WORKFLOW, CONNECTED</span>
@@ -229,17 +290,17 @@ export default function Landing() {
             <span />
             <span />
             <span />
-            <small>NeuroLoop / MCP tool sequence</small>
+            <small>NeuroLoop / example MCP sequence</small>
           </div>
           <div className="terminal-content">
             <small>DISCOVER</small>
-            <code>get_capabilities()</code>
+            <code><span className="syntax-function">get_capabilities</span><span className="syntax-punctuation">(</span><span className="syntax-argument"></span><span className="syntax-punctuation">)</span></code>
             <small>EXPERIMENT</small>
-            <code>evaluate_creative(project_id)</code>
-            <code>run_experiment(project_id, operator)</code>
+            <code><span className="syntax-function">evaluate_creative</span><span className="syntax-punctuation">(</span><span className="syntax-argument">project_id</span><span className="syntax-punctuation">)</span></code>
+            <code><span className="syntax-function">optimize_creative</span><span className="syntax-punctuation">(</span><span className="syntax-argument">project_id, max_evaluations=4</span><span className="syntax-punctuation">)</span></code>
             <small>REVIEW & EXPORT</small>
-            <code>get_evidence(evaluation_id)</code>
-            <code>export_result(run_id)</code>
+            <code><span className="syntax-function">get_evidence</span><span className="syntax-punctuation">(</span><span className="syntax-argument">evaluation_id</span><span className="syntax-punctuation">)</span></code>
+            <code><span className="syntax-function">export_result</span><span className="syntax-punctuation">(</span><span className="syntax-argument">run_id</span><span className="syntax-punctuation">)</span></code>
             <div className="terminal-note">
               Authenticated. Bounded. Traceable.
             </div>
@@ -270,6 +331,30 @@ export default function Landing() {
           </Link>
         </div>
       </section>
+
+      <IntegrationStrip />
+      <aside className="build-easter-egg" aria-label="Behind the build">
+        <details>
+          <summary>
+            <span>
+              <span className="eyebrow">BEHIND THE BUILD</span>
+              <span className="build-easter-egg-title">Built locally. Tested emotionally.</span>
+            </span>
+            <span className="build-easter-egg-toggle" aria-hidden="true">+</span>
+          </summary>
+          <figure>
+            <img
+              src="/brand/neuroloop-tribe-local-meme.png"
+              width={1448}
+              height={1086}
+              loading="lazy"
+              decoding="async"
+              alt="Woman yelling at a cat: I said run TRIBE locally. The cat replies: You have 12 GB of VRAM. Codex and Meta TRIBE v2 badges. Caption: The model fits. The laptop has questions."
+            />
+            <figcaption>A little humor from building NeuroLoop on a laptop.</figcaption>
+          </figure>
+        </details>
+      </aside>
 
       <MotionFooter />
     </main>

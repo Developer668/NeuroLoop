@@ -31,6 +31,8 @@ import {
   Play,
   Download,
   AlertCircle,
+  Sun,
+  Moon,
 } from "lucide-react";
 import {
   api,
@@ -50,6 +52,7 @@ import {
   Empty,
   AssetVisual,
   Modal,
+  AnimatedNumber,
   errorText,
   dateText,
 } from "./UI";
@@ -79,16 +82,17 @@ const NAV = [
   { id: "compare", name: "Compare", icon: GitCompareArrows },
   { id: "runs", name: "Experiments", icon: FlaskConical },
   { id: "brain", name: "Brain lab", icon: Brain },
-  { id: "research", name: "Research", icon: ChartNoAxesCombined },
-  { id: "neuro", name: "Neuro", icon: NeuroMark },
+  { id: "research", name: "Logs & analytics", icon: ChartNoAxesCombined },
+  { id: "neuro", name: "Neuro AI", icon: NeuroMark },
   { id: "connections", name: "MCP connections", icon: Plug },
   { id: "settings", name: "Settings", icon: Settings },
 ];
 const HEADINGS: Record<string, [string, string, string]> = {
-  neuro: ["Workspace / Neuro", "Neuro", "Your evidence, within reach."],
+  upload: ["Workspace / upload", "Add a creative", "One source at a time. Preview it before creating an experiment."],
+  neuro: ["Workspace / Neuro AI", "Neuro AI", "Your evidence, within reach."],
   overview: [
     "Workspace / overview",
-    "Your next creative decision.",
+    "Workspace overview",
     "Your creatives, experiments, and the evidence behind every decision.",
   ],
   projects: [
@@ -113,7 +117,7 @@ const HEADINGS: Record<string, [string, string, string]> = {
   ],
   research: [
     "Research / experiment policy",
-    "Research & insights",
+    "Logs & analytics",
     "Explore what changed, what failed, and whether experience is helping the search.",
   ],
   connections: [
@@ -141,6 +145,16 @@ export default function Workspace() {
   const view = search.get("view") || "overview",
     runId = search.get("run") || "",
     evaluationId = search.get("evaluation") || "";
+  const [dark, setDark] = useState(false);
+  useEffect(() => {
+    try { setDark(localStorage.getItem("neuroloop-theme") === "dark"); } catch {}
+  }, []);
+  function toggleTheme() {
+    setDark(current => {
+      try { localStorage.setItem("neuroloop-theme", current ? "light" : "dark"); } catch {}
+      return !current;
+    });
+  }
   const [preferences, setPreferences] = useState({
     workspace_name: "My workspace",
     display_name: "NeuroLoop",
@@ -242,7 +256,7 @@ export default function Workspace() {
       </div>
     );
   if (auth === "needed" || !data) return <ConnectGate onConnected={reload} />;
-  const nav = NAV.find((n) => n.id === view) || NAV[0],
+  const nav = (view === "upload" ? {name: "Upload"} : NAV.find((n) => n.id === view)) || NAV[0],
     heading = HEADINGS[view] || HEADINGS.overview;
   const activeRuns = data.runs.filter((r) =>
     ["queued", "running"].includes(r.status),
@@ -321,7 +335,7 @@ export default function Workspace() {
       />
     );
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-theme={dark ? "dark" : "light"}>
       {mobile && (
         <button
           className="sidebar-scrim"
@@ -331,7 +345,7 @@ export default function Workspace() {
       )}
       <aside className={"sidebar " + (mobile ? "open" : "")}>
         <Brand />
-        <Link href="/workspace?view=library" className="sidebar-create">
+        <Link href="/workspace?view=upload" className="sidebar-create">
           <Plus size={16} />
           Add a creative
           <ArrowUpRight size={14} />
@@ -370,6 +384,10 @@ export default function Workspace() {
           ))}
         </nav>
         <div className="sidebar-bottom">
+          <button className="theme-toggle" onClick={toggleTheme} aria-pressed={dark}>
+            {dark ? <Sun size={17} /> : <Moon size={17} />} {dark ? "Light appearance" : "Dark appearance"}
+          </button>
+          {data.capabilities.execution?.paused && <Link className="hold-compact" href="/workspace?view=settings" title="GPU execution remains paused pending graphics-crash diagnosis."><AlertCircle size={14} /> Model execution paused ↗</Link>}
           <Link href="/workspace?view=settings" className="sidebar-profile">
             <span className="avatar">
               <ProfileAvatar />
@@ -428,25 +446,10 @@ export default function Workspace() {
         </div>
       </header>
       <main className="main">
-        {data.capabilities.execution?.paused && (
-          <aside className="execution-hold" role="status">
-            <AlertCircle size={19} />
-            <div>
-              <strong>Model execution is paused</strong>
-              <p>
-                A graphics crash interrupted the last run. Saved results,
-                research and connections remain available.
-              </p>
-            </div>
-            <Link href="/workspace?view=settings">
-              View system status <ArrowUpRight size={14} />
-            </Link>
-          </aside>
-        )}
         {!(view === "runs" && runId) &&
           view !== "brain" &&
           view !== "neuro" && (
-            <div className="page-title">
+            <div className="page-title" key={view}>
               <div>
                 <span className="eyebrow">{heading[0]}</span>
                 <h1>{heading[1]}</h1>
@@ -455,7 +458,7 @@ export default function Workspace() {
               <div className="button-row">
                 {["overview", "projects", "library"].includes(view) && (
                   <>
-                    <button className="button" onClick={() => go("library")}>
+                    <button className="button" onClick={() => go("upload")}>
                       <Upload size={14} />
                       Upload creative
                     </button>
@@ -517,7 +520,13 @@ export default function Workspace() {
                       <Component size={13} />
                       {String(label)}
                     </div>
-                    <strong>{String(value)}</strong>
+                    <strong>
+                      {Number.isFinite(Number(value)) ? (
+                        <AnimatedNumber value={Number(value)} />
+                      ) : (
+                        String(value)
+                      )}
+                    </strong>
                     <small>{String(description)}</small>
                   </div>
                 );
@@ -588,7 +597,7 @@ export default function Workspace() {
                   </Panel>
                 )}
                 <div className="overview-shortcuts">
-                  <button onClick={() => go("library")}>
+                  <button onClick={() => go("upload")}>
                     <Upload size={18} />
                     <span>
                       Bring a new creative
@@ -661,9 +670,10 @@ export default function Workspace() {
             </Panel>
           </>
         )}
+        {view === "upload" && <div className="upload-page"><UploadBox onUploaded={() => { reload(); go("library"); }} /><Link className="text-link" href="/workspace?view=library">Back to library ↗</Link></div>}
         {view === "library" && (
           <div className="stack">
-            <UploadBox onUploaded={() => reload()} />
+
             <div className="button-row">
               <div className="pill-tabs">
                 {["all", "video", "image", "audio", "text"].map((k) => (

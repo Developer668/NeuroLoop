@@ -17,6 +17,14 @@ def resolve_device(requested: str | None = None) -> str:
     if requested not in _VALID_DEVICES:
         raise ValueError(f"Unsupported inference device: {requested}")
 
+    from .execution_guard import cpu_verification_enabled
+    if cpu_verification_enabled():
+        if requested != 'cpu':
+            raise RuntimeError('CPU verification cannot select auto, CUDA or MPS')
+        return 'cpu'
+    if requested == 'cpu':
+        return 'cpu'
+
     import torch
 
     if requested == "auto":

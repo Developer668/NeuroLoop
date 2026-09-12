@@ -2,10 +2,16 @@
 
 This document describes the implementation inspected during the September 10,
 2026 operational audit. The system lives in `D:\NeuroLoop` and runs on one laptop.
-See [AUDIT.md](AUDIT.md) for measured results and [REMAINING-WORK.md](REMAINING-WORK.md)
+See [FRESH-EXECUTION.md](FRESH-EXECUTION.md) for the September 11 follow-up results, [AUDIT.md](AUDIT.md) for historical measurements and [REMAINING-WORK.md](REMAINING-WORK.md)
 for gaps. Implemented does not mean scientifically validated or ready for public deployment.
 
-**Recovery state:** `data/inference-quarantine.json` is still the persistent Windows safety hold after the graphics crash. Windows continues to omit model execution while that record exists. On Apple Silicon, `Start-NeuroLoop.sh` can explicitly enable the guarded MPS worker without deleting the hold. The Mac path keeps conservative memory checks and fails closed. The current memory-first V-JEPA2 configuration still needs one fresh uncached full-loop acceptance run.
+**Recovery state:** GPU work and Launch are currently held by `data/inference-quarantine.json` after the 21:47 Pacific graphics crash. The flow below describes implemented execution; only review/API/research services run while the hold exists.
+
+An explicit `scripts/verify_cpu_run.py` process can now verify one newly queued CPU run while preserving that GPU hold. It initializes a fresh stdio MCP client, queues through the same service, acquires the shared worker lock, executes under the existing supervisor and validates saved arrays/manifests. CUDA is hidden before imports; duration, threads and memory are bounded. It does not start the general worker or Launch agent.
+
+The video encoder preserves Neuralset's twenty selected layers and two downstream group means (2,816 features). Token pooling occurs before host transfer; exact static decoded frames may reuse one frozen-model feature result. Feature cache namespaces bind the complete checked evaluator profile and resolved device. Exca worker-liveness checks use read-only process lookup on Windows.
+
+Kragel scoring is a diagnostic branch unless registration and transfer eligibility are explicitly established. Diagnostic intervals intersect original TRIBE windows with actual source support; padded windows outside the media are excluded, while raw cortical predictions remain unchanged. Scientific eligibility is independent of technical execution success.
 
 ## What the product actually does
 
@@ -50,7 +56,7 @@ flowchart TD
     Hold[Persistent execution hold] -. blocks new model work .-> Domain
 ```
 
-`scripts/manage.py` owns the API, Next.js server, research app and, when execution is enabled, the worker and restricted Launch agent. The persistent hold omits executors by default; the Mac launcher can explicitly start the guarded MPS worker while preserving the hold record. Launch remains separate and is not enabled by the Mac override.
+`scripts/manage.py` owns the API, Next.js server, research app and, when execution is enabled, the worker and restricted Launch agent. The current hold omits both executors.
 Windows job objects bind descendant lifetime to their owning supervisor. The
 worker uses a file lock to serialize GPU jobs. The API queues work and returns
 a run ID rather than keeping a request open for inference. Polling and recorded
@@ -68,7 +74,8 @@ run events provide progress. All three web services bind to loopback.
 | `backend/neuroloop/services.py` | Validation, immutable run contracts, queue creation and workspace queries |
 | `backend/neuroloop/mcp_server.py`, `mcp_extensions.py` | Eighteen agent tools over those same services |
 | `backend/neuroloop/worker.py` | Job execution, references, cache, experiments, stopping and recovery |
-| `backend/neuroloop/inference.py` | Local preprocessing, evaluation subprocess and actual model prediction |
+| `backend/neuroloop/inference.py` | Local preprocessing, input-specific model loading, evaluation subprocess and actual model prediction |
+| `backend/neuroloop/modality.py` | Pure input-to-feature routing contract and reader-measurement limitations |
 | `backend/neuroloop/readout.py`, `comparison.py` | Numerical summaries and fixed response similarity |
 | `backend/neuroloop/policy.py` | Context-specific edit statistics and Thompson sampling |
 | `backend/neuroloop/tsam.py`, `anatomy.py` | Independent audiovisual logits and compatible anatomical readout |
@@ -99,10 +106,15 @@ The active app uses `.runtimes/app`; model execution uses `.runtimes/model`, and
    explicitly provided timings take precedence. Text requires real supplied timing.
 3. A static image requires an explicitly acknowledged repeated-frame presentation.
    This is an experimental input adaptation, not proof of thumbnail effectiveness.
-4. `models/load_local_tribe.py` selects V-JEPA2 INT8 video features, Llama-3.2-3B
-   base NF4 text features and official Wav2Vec-BERT audio features. Audio encoding
-   and video hidden-state pooling use CPU; GPU feature/model work is bounded.
-   DINOv2-large is downloaded but inactive in the shipped feature configuration.
+4. The modality planner selects only the trained feature keys justified by the
+   asset: video uses V-JEPA2 INT8, audio adds Wav2Vec-BERT when an audio stream is
+   present, and timed words add Llama-3.2-3B base NF4. Text-only runs use the text
+   branch; silent visual runs do not load audio or text; audio-only runs do not
+   load video. Audio encoding and compact video feature pooling use CPU after the
+   configured layer-group mean is computed; GPU feature/model work is bounded. An image uses the explicit repeated-frame video
+   adaptation because the shipped checkpoint has no compatible direct image
+   projector. DINOv2-large therefore remains optional/inactive until an
+   image-compatible checkpoint is trained and validated.
 5. The original TRIBE brain checkpoint predicts using the shared feature timeline.
    The preprocessing grid is 2 Hz; output timestamps come from TRIBE's returned
    segments and must not be replaced by an assumed display rate.
@@ -110,8 +122,11 @@ The active app uses `.runtimes/app`; model execution uses `.runtimes/model`, and
    10,242 fsaverage5 vertices each. The code atomically writes the array, returned
    segments and evidence. The audit independently recomputed these summaries.
 7. Optional TSAM reads the original audiovisual source separately on CPU. It emits
-   eight signed logits per complete five-second window. It is not a TRIBE decoder
-   and contributes nothing to the optimization score.
+   eight signed logits per complete five-second window. It is not a TRIBE decoder,
+   is not applicable to a text-only stimulus, and contributes nothing to the
+   optimization score. Text runs describe predicted average cortical response to
+   a timed stimulus; they do not measure the reader's actual feeling or brain
+   activity without a separate validated human-sensor pipeline.
 
 The 20,484 points are **surface vertices, not individual neurons**. The brain UI
 shows a cortical mesh, with surface/points/wireframe modes, hemisphere spacing,
@@ -220,7 +235,10 @@ source hashes, transform profile and limitations remain in each evaluation recor
 
 TSAM remains independent from TRIBE. It receives the original audiovisual stimulus and
 returns eight uncalibrated class logits in five-second windows. It is never fed a TRIBE
-array. The staged macOS model environment pins the dependencies required by the upstream
+array. Its exact class order is Anger, Contempt, Disgust, Fear, Happiness, Neutral,
+Sadness, Surprise. Windows are complete, non-overlapping five-second intervals with a
+five-second stride; incomplete tails are omitted and reported. The staged macOS model
+environment pins the dependencies required by the upstream
 implementation and strict checkpoint loading is required at runtime.
 
 ### Response ensemble
@@ -234,6 +252,16 @@ visible. Missing sources cause a transparent degraded calculation, not invented 
 The target metric `response-target-distance/v1` compares these relative model-evidence
 values with the user-declared `TargetSpec` and applies a disagreement penalty. It is an
 optimization score, not a percentage of viewers predicted to feel an emotion.
+
+`TargetSpec` defaults to a whole-creative objective for compatibility, and can select a
+normalized `[0,1]` interval or multiple named intervals. Each source is aligned to the
+same source-duration axis and scored only over actual overlap. Short clips, omitted
+tails, and disjoint/unsupported dimensions remain explicit missing coverage; changing a
+different segment cannot satisfy a selected segment's target. Overlapping rows use
+interval-union coverage and are integrated once per atomic interval. A temporal target
+with any uncovered gap or partially supported requested dimension is not scoreable. The
+response provenance contract records model/checkpoint/preprocessing/geometry/projection
+metadata plus the ensemble specification hash.
 
 ### Intervention and generation boundary
 

@@ -116,6 +116,24 @@ def test_unsupported_constraints_rejected(client,authed):
     r=client.post('/api/runs',headers=authed,json={'project_id':p['id'],'allow_static_presentation':True})
     assert r.status_code==400 and 'Unsupported constraints' in r.json()['detail']
 
+def test_full_creative_constraint_contract_reaches_worker_queue(client,authed):
+    a=image_upload(client,authed)
+    p=project(client,authed,a['id'],constraints={
+        'required_copy':['Keep exact copy'],
+        'required_logo':'logo-v1',
+        'required_objects':['product-pack'],
+        'expected_width':64,
+        'expected_height':48,
+        'preserve_dimensions':True,
+        'require_audio':False,
+    })
+    r=client.post('/api/runs',headers=authed,json={
+        'project_id':p['id'],
+        'allow_static_presentation':True,
+    })
+    assert r.status_code==202,r.text
+    assert r.json()['config']['project_snapshot']['constraints']==p['constraints']
+
 def test_never_invent_missing_emotion_outputs(client,authed):
     data=client.get('/api/capabilities',headers=authed).json()
     assert data['kragel']['status']=='missing_assets'

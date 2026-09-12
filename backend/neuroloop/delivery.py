@@ -9,6 +9,12 @@ from .config import settings
 
 FIELDS = {'run_id','asset_id','record_id','profile','compute_seconds','status','evaluations_used','decision','gain','operator','evaluation_id','experiment_id','metric','exception_type','parent_receipt_id','started_at','ended_at'}
 
+def recorded_exception(payload):
+    """Project a recorded local failure into Weave without sending error text."""
+    if payload.get('exception_type') or payload.get('status') == 'failed':
+        return RuntimeError('Recorded local operation failed; inspect the local execution log for details.')
+    return None
+
 def enqueue(name: str, payload: dict, identity: str | None = None) -> str | None:
     if not settings().weave_enabled:
         return None
@@ -43,11 +49,14 @@ def drain(limit=5, connection=None):
                     # Same call ID on retry: crashes cannot silently create a new logical event.
                     payload=json.loads(row['payload'])
                     call=connection.create_call(op=row['name'],inputs=payload,use_stack=False,_call_id_override=row['id'],started_at=datetime.fromisoformat(payload.get('started_at',row['created_at'])),attributes={'application':'neuroloop','data_policy':'metadata-only','receipt_id':row['id']})
-                    connection.finish_call(call,output={'locally_recorded':True},ended_at=datetime.fromisoformat(payload.get('ended_at',row['created_at'])))
+                    failure=recorded_exception(payload)
+                    connection.finish_call(call,output={'locally_recorded':True,'local_outcome':'failed' if failure else payload.get('status','recorded')},exception=failure,ended_at=datetime.fromisoformat(payload.get('ended_at',row['created_at'])))
                     connection.flush()
                     remote=connection.get_call(row['id'])
                     if getattr(remote,'id',None)!=row['id'] or getattr(remote,'ended_at',None) is None:
                         raise RuntimeError('Remote receipt is not complete')
+                    if failure and not getattr(remote,'exception',None):
+                        raise RuntimeError('Remote receipt did not preserve the local failure')
                     project=os.environ['WANDB_PROJECT']
                     url=f'https://wandb.ai/{project}/weave/calls/{row["id"]}'
                     with engine.begin() as db:

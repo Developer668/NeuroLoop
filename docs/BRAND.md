@@ -2,7 +2,7 @@
 
 ## Assistant assets
 
-The dedicated Neuro page currently uses `frontend/public/brand/neuro-assistant-v1.png` with an SVG companion. `frontend/public/brand/neuro-assistant-flat.png` is the subsequently requested flat navy/teal, untextured image variant. It is included as an asset but has not replaced the currently wired artwork. The assistant page executes local evidence commands; its artwork does not indicate an enabled conversational model.
+The assistant is named Neuro AI. Its page, navigation mark and response avatar use the user-supplied flat image at `frontend/public/brand/neuro-ai.png`. The textured `neuro-assistant-v1.png` remains an unused historical asset. The assistant still executes local evidence commands; this visual update does not enable a conversational model.
 
 The logo was generated using the built-in GPT Image tool, then copied unchanged to `frontend/public/brand/neuroloop.png`. The original remains in the Codex generated-images directory. The interface uses navy, teal, white and mineral gray. The wordmark is live text next to the generated symbol; no mock customer logos, invented metrics or endorsements are used.
 
