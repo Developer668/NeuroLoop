@@ -97,6 +97,11 @@ def _require_requested_readouts(body: RunCreate, root: Path) -> None:
                 f'{label} readout was requested, but required assets are missing: {missing}. '
                 f'Install the {label} assets later before requesting this readout.'
             )
+    if body.mode == 'optimize' and body.objective == 'response_target' and body.include_kragel:
+        from .kragel import registration
+        if not registration().get('decision_eligible', False):
+            raise DomainError('Kragel can be displayed as a diagnostic readout, but response-target optimization requires verified spatial registration and held-out TRIBE transfer validation. Use Analyze for diagnostic projection.')
+
 def _digest(value: object) -> str:
     """Digest JSON-serializable contract data without exposing local paths."""
     encoded = json.dumps(value, sort_keys=True, separators=(',', ':'), default=str, allow_nan=False)
@@ -130,8 +135,8 @@ def capabilities() -> dict:
     readouts=readout_asset_status(root)
     return {'product':'NeuroLoop','version':'0.1.0','execution':execution_status(),'deployment':'single-workspace authenticated local service','training':False,'models':[{'name':name,'status':'downloaded' if path.is_file() else 'missing'} for name,path in assets+optional_assets],
       'tribe':{'status':'weights_present' if all(p.is_file() for _,p in assets) else 'missing_weights','last_technical_test':verification,'meaning':'Predicted average-subject cortical response; not thoughts or purchase intent.'},
-      'tsam':{**readouts['tsam'],'reason':'Independent CPU audiovisual readout. Install the checkpoint and pinned source tree later; outputs remain uncalibrated relative evidence and research/non-commercial restrictions apply.'},
-      'kragel':{**readouts['kragel'],'reason':'Published pattern-expression scaffold only. Install the seven source volume pairs later; registration, scoring and transfer remain scientifically unvalidated and upstream terms apply.'},
+      'tsam':{**readouts['tsam'],'reason':'Independent CPU audiovisual readout. Readiness above checks the checkpoint and source tree; outputs remain uncalibrated relative evidence and research/non-commercial restrictions apply.'},
+      'kragel':{**readouts['kragel'],'reason':'Published pattern-expression scaffold only. Readiness above checks the seven source volume pairs; registration, scoring and transfer remain scientifically unvalidated and upstream terms apply.'},
       'generation_providers':generation_statuses(),
       'modalities':{'video':'neural analysis and bounded controlled edits','image':'explicit experimental repeated-frame presentation','audio':'audio response; local speech transcription or supplied timed words','text':'timed-text stimulus using the text encoder; no individual reader measurement'},
       'model_routing':routing_capabilities(),

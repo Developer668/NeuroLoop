@@ -1,5 +1,6 @@
 """Local INT8 SafeTensors loader. Does not execute Hugging Face repository code."""
 import inspect
+import hashlib
 import json
 from pathlib import Path
 import yaml
@@ -11,6 +12,15 @@ from safetensors.torch import load_file
 from transformers import VJEPA2Config, VJEPA2Model, AutoVideoProcessor
 
 ROOT = Path(__file__).resolve().parent
+
+def _static_video_key(images):
+    """Only identical decoded frames qualify for exact feature reuse."""
+    import numpy as np
+    if images.ndim != 4 or not len(images):
+        return None
+    if not all(np.array_equal(frame, images[0]) for frame in images[1:]):
+        return None
+    return (images.shape, str(images.dtype), hashlib.sha256(images[0].tobytes()).hexdigest())
 
 
 def _supports_safetensors_backend():
@@ -35,28 +45,22 @@ def _load_video_state_dict(path, device):
     return load_file(path, device='cpu'), False
 
 
-def _compact_hidden_states(hidden_states, layer_points=(0.75, 1.0)):
-    """Apply the shipped group-mean layer contract before host transfer.
+def _compact_hidden_states(hidden_states, cache_n_layers=20):
+    """Preserve Neuralset's layer subselection; pool only the token dimension.
 
-    V-JEPA returns all hidden layers, while the local TRIBE config consumes
-    the group bounded by normalized layers 0.75 and 1.0.  Averaging that group
-    in FP32 on the inference device avoids creating a second host-side FP32
-    copy of every intermediate layer.  The returned one-layer tuple is still
-    accepted by Neuralset's configured group-mean aggregation and produces the
-    same feature shape.
+    The checkpoint consumes TWO group means from the 20 selected layers.
+    Pooling tokens on-device is equivalent to the downstream mean, while
+    collapsing layer groups here would change its 2,816-feature contract.
     """
+    import numpy as np
     states = tuple(hidden_states or ())
     if not states:
         raise RuntimeError('V-JEPA returned no hidden states')
-    indices = sorted({int(point * (len(states) - 1)) for point in layer_points})
-    if len(indices) == 1:
-        return (states[indices[0]],)
-    start, stop = indices[0], indices[-1] + 1
-    mean = states[start].to(dtype=torch.float32)
-    for state in states[start + 1:stop]:
-        mean.add_(state.to(dtype=torch.float32))
-    mean.div_(stop - start)
-    return (mean,)
+    indices = range(len(states))
+    if cache_n_layers is not None and cache_n_layers < len(states):
+        indices = [int(round(x)) for x in np.linspace(0, len(states) - 1, cache_n_layers)]
+    return tuple(states[index].to(dtype=torch.float32).mean(dim=-2, keepdim=True)
+                 for index in indices)
 
 
 def resolve_device(device='auto'):
@@ -142,6 +146,20 @@ def load_quantized_tribev2(repo_dir=ROOT, device='auto', cache_folder=None, feat
     original = video_module._HFVideoModel
 
     class LocalVideoModel(original):
+        def predict_hidden_states(self, images, audio=None):
+            # Repeated-frame image presentations feed precisely the same tensor
+            # at every timestep. Reuse one actual frozen-model forward result,
+            # never a response from a merely similar image or moving video.
+            # This V-JEPA forward consumes only pixels; TRIBE's audio encoder
+            # is a separate branch. Never apply this rule to an audio-aware model.
+            key = _static_video_key(images) if self.model_name == 'facebook/vjepa2-vitg-fpc64-256' else None
+            cached = getattr(self, '_static_features', None)
+            if key is not None and cached is not None and cached[0] == key:
+                return cached[1].clone()
+            out = super().predict_hidden_states(images, audio)
+            self._static_features = (key, out.detach().clone()) if key is not None else None
+            return out
+
         def __init__(self, model_name, pretrained=True, layer_type='', num_frames=None):
             if model_name != 'facebook/vjepa2-vitg-fpc64-256':
                 super().__init__(model_name, pretrained, layer_type, num_frames)
@@ -167,9 +185,9 @@ def load_quantized_tribev2(repo_dir=ROOT, device='auto', cache_folder=None, feat
             # hidden states are copied to their required CPU representation.
             del inputs
             # Neuralset converts features to numpy, which does not support BF16.
-            # The shipped config uses group_mean over the final 25% of layers;
-            # compact that group before transfer rather than materializing all
-            # 41 FP32 token layers on host memory alongside text/audio models.
+            # Preserve the 20 cached layers and both configured group means.
+            # Pool tokens before host transfer to avoid retaining all 41
+            # FP32 token layers alongside text/audio models.
             compacted = _compact_hidden_states(result.hidden_states)
             result.hidden_states = tuple(x.to(device='cpu', dtype=torch.float32) for x in compacted)
             del compacted

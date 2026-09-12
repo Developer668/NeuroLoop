@@ -78,7 +78,9 @@ class ModelLoaderContractTests(unittest.TestCase):
         self.assertIn("tribe.data.audio_feature.device = 'cpu'", self.local_source)
         self.assertIn("tribe.data.video_feature.image.device = device", self.local_source)
         self.assertIn("'data.video_feature.frequency': 2.0", self.video_source)
-        self.assertIn("model.lock", self.local_source)
+        # The full checked profile includes model.lock and all encoder assets.
+        self.assertIn("cache_identity = profile_id()", self.local_source)
+        self.assertIn("{cache_identity}|{device}", self.local_source)
 
     def test_documentation_names_tradeoffs_and_unmeasured_limits(self):
         for phrase in (

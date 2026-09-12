@@ -1,8 +1,10 @@
 # NeuroLoop
 
+See the [agentic loop review](docs/AGENTIC-LOOP-REVIEW.md) for what runs today, what learns, recovery limits, sponsor evidence and the proposed held-out benchmark. The [scientific audit](docs/SCIENTIFIC-VALIDATION-AUDIT.md) separates verified model execution from unpassed validation.
+
 A local creative research workspace with real TRIBE v2 predictions, controlled media edits, cortical visualization and an auditable experiment ledger. The website and MCP clients use the same services, data and execution rules.
 
-**September 10, 2026 recovery status: the application is available for evidence review; GPU inference and Launch execution are paused after another Windows graphics crash. Production release is not cleared.** The crash cause has not been diagnosed. Reopening the app does not restart the failed workload.
+**September 11, 2026 status: the application is available for evidence review; GPU inference and Launch execution are paused after another Windows graphics crash. Production release is not cleared.** The crash cause has not been diagnosed. Reopening the app does not restart the failed workload.
 
 ## Open the application
 
@@ -23,24 +25,30 @@ On Windows, double-click `D:\NeuroLoop\Start-NeuroLoop.cmd`. On Apple Silicon ma
 ## What is implemented
 
 - Next.js/React landing, library, projects, comparisons, experiments, anatomical Brain Lab, research, settings and connections. A dedicated Neuro page replaces the floating assistant.
-- Neuro's generated ribbon artwork and SVG mark; autosizing session draft; five real local evidence commands; animated pixel loading during requests. Free-form AI conversation remains deferred, as requested. No microphone, model selector or invented AI response is represented as working.
-- Animated background paths, cinematic footer reveal, moving typography, pointer-responsive workspace link, responsive layouts and reduced-motion support.
+- Neuro AI's supplied flat navy/teal artwork; autosizing session draft; five real local evidence commands; animated pixel loading during requests. Free-form AI conversation remains deferred, as requested. No microphone, model selector or invented AI response is represented as working.
+- Animated background paths, cinematic footer reveal, moving typography, compact footer, responsive layouts and reduced-motion support.
 - FastAPI services, SQLite queue/events, managed uploads, FFmpeg compositions and bounded edits, numerical acceptance rules, versioned caches and actual evidence ZIPs.
 - Locally quantized TRIBE pipeline with input-specific loading: video selects INT8 V-JEPA2, audio selects Wav2Vec-BERT, timed words select NF4 base Llama-3.2-3B, and unused feature encoders stay unloaded. Images use the explicit repeated-frame compatibility path; DINOv2 is optional/inactive for the shipped checkpoint.
 - Anatomical fsaverage5 surface with 20,484 vertices and 148 Destrieux parcels; saved response coloring, timelines and comparison overlays. These vertices are not individual neurons.
-- Eighteen NeuroLoop MCP tools; an official W&B MCP server with 19 read-only tools; a local marimo notebook with seven experiment plots plus tables and cortical timelines.
+- Twenty-one NeuroLoop MCP tools; an official W&B MCP server with 19 read-only tools; a local marimo notebook with seven experiment plots plus tables and cortical timelines.
 - Credentialed Weave with remotely verified trace receipts and a durable retry outbox. An ARIA review of real W&B results and a versioned, restricted local Launch adapter exist. The full Launch experiment failed during the graphics crash and is not accepted as completed.
 - Isolated pinned runtimes, versioned database migrations, session revocation, backup/restore tooling, owned-process cancellation and a persistent execution hold.
 
-## Actual evidence
+## Latest verification
+
+See [fresh execution and UI verification](docs/FRESH-EXECUTION.md). Fresh CPU-only TRIBE image, one-second motion-video, audio and timed-text runs now pass through MCP, the worker and saved artifact verification; TSAM also completed a fresh Windows CPU forward pass. The six-second visual attempt timed out; intermediate bugs and failed attempts remain documented. The backend suite passes 215 tests (5 skips), with two model-runtime tests passing separately, and the redesigned frontend production build passes. GPU stability remains unestablished.
+
+Open the actual [Molab evidence notebook](https://molab.marimo.io/notebooks/nb_B79BrKA5Rh4UNJxj9NQ1kf) for eleven numerical chart views, and the [fresh audio Weave trace](https://wandb.ai/jerry-wen0616-santa-clara-university/neuroloop/weave/calls/562f0b92-9d69-46cd-bf32-8d4306ac05cf) for independently verified run provenance. Molab contains a sanitized snapshot; local marimo reads the live ledger.
+
+## Historical inference evidence
 
 The isolated runtime completed a new MCP-driven silent NASA composition evaluation: **6 × 20,484 values in 42.485 seconds**, evaluation `cdfaacce-e365-4eca-8447-ba323c64d5e5`. A later audiovisual baseline completed in **89.437 seconds**; its reference evaluation was interrupted by the Windows crash. Neither timing is a general cold-start benchmark.
 
-[Open the completed isolated-runtime result](http://localhost:3010/workspace?view=brain&evaluation=cdfaacce-e365-4eca-8447-ba323c64d5e5).
+Those historical records are preserved in the local pre-refresh backup. The live workspace was cleared at the user's request and now contains fresh verification projects, assets, successful evaluations and explicitly recorded failed attempts. See per-run receipts in `artifacts/refresh-verification/` for current counts and identities.
 
 The post-crash audit checked **29 saved arrays and 32 managed media files**: all array summaries, served first frames and asset hashes matched. **109 backend tests passed**, the frontend production build passed, and the recovery audit passed all 16 checks without neural execution. See [AUDIT.md](docs/AUDIT.md) for evidence and limitations.
 
-NeuroLoop now supports both predicted-cortical reference similarity and an experimental response-target loop. Response-target runs keep TSAM direct-media logits and TRIBE-derived Kragel pattern expression separate, combine them through an explicit versioned ensemble, and optimize controlled local interventions against a declared target. These are relative model-evidence scores, not measured emotions, liking, conversion, or a particular person's response. Model weights remain frozen; only context-specific intervention statistics adapt. Scientific transfer validation and quantization accuracy remain open.
+NeuroLoop now supports both predicted-cortical reference similarity and an experimental response-target loop. Response-target runs keep TSAM direct-media logits and TRIBE-derived Kragel pattern expression separate, retain unvalidated Kragel results as diagnostics and require explicit registration and transfer eligibility before combining them for optimization. Eligible response evidence can drive controlled local interventions against a declared target. These are relative model-evidence scores, not measured emotions, liking, conversion, or a particular person's response. Model weights remain frozen; only context-specific intervention statistics adapt. Scientific transfer validation and quantization accuracy remain open.
 
 ## Folder map
 

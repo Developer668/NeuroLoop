@@ -15,6 +15,7 @@ import hashlib
 import json
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -27,8 +28,8 @@ HEMISPHERES = ("left", "right")
 TRIBE_VERTICES_PER_HEMISPHERE = 10242
 RIBBON_DEPTHS = (0.0, 0.25, 0.5, 0.75, 1.0)
 PROFILE = "kragel2015-bpls-mni-volume-to-fsaverage5-ribbon-v1"
-CODE_VERSION = "kragel-response-contract-v2"
-PROJECTION_VERSION = "mni-affine-inverse-white-pial-five-depth-mean-v2"
+CODE_VERSION = "kragel-registration-contract-v3"
+PROJECTION_VERSION = "explicit-surface-to-volume-ribbon-v3"
 GEOMETRY_VERSION = "fsaverage5-gifti-left-right-v1"
 
 
@@ -53,6 +54,49 @@ def _sha256(path: Path) -> str | None:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def registration() -> dict:
+    """Report registration separately from downloaded assets and interpolation.
+
+    No filename or successful projection establishes spatial registration.
+    An optional externally reviewed registration can supply the complete chain.
+    The receipt is bound to the exact four surfaces and fourteen volume files.
+    """
+    path = _geometry("kragel-registration.json")
+    base = {
+        "version": "kragel-registration-receipt-v1",
+        "verified": False,
+        "decision_eligible": False,
+        "status": "unverified_coordinate_assumption",
+        "surface_space": "fsaverage5 surface RAS; GIFTI metadata alone does not establish MNI152",
+        "volume_space": "published Kragel MNI volume; exact template registration requires review",
+        "surface_to_volume_world": np.eye(4).tolist(),
+        "reason": "Diagnostic projection assumes identical surface and volume world coordinates. The complete surface-RAS to volume-world registration has not been verified.",
+        "reference": "https://surfer.nmr.mgh.harvard.edu/fswiki/CoordinateSystems",
+    }
+    if not path.is_file():
+        return base
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        matrix = np.asarray(receipt["surface_to_volume_world"], dtype=float)
+        if matrix.shape != (4, 4) or not np.isfinite(matrix).all() or abs(np.linalg.det(matrix)) < 1e-10 or not np.allclose(matrix[3], [0, 0, 0, 1]):
+            raise ValueError("Registration matrix must be a finite invertible homogeneous 4-by-4 affine")
+        expected_geometry = _geometry_manifest()["files"]
+        expected_volumes = {path.name: _sha256(path) for emotion in EMOTIONS for path in (_volume_path(emotion), _volume_path(emotion).with_suffix(".img"))}
+        if receipt.get("geometry_sha256") != expected_geometry or receipt.get("volume_sha256") != expected_volumes:
+            raise ValueError("Registration receipt does not match the current surface and signature files")
+        for field in ("source_space", "target_space", "method", "reviewed_by", "reference"):
+            if not isinstance(receipt.get(field), str) or not receipt[field].strip():
+                raise ValueError(f"Registration receipt needs {field}")
+        validation = receipt.get("validation", {})
+        if validation.get("spatial_alignment_passed") is not True or validation.get("hemisphere_order_passed") is not True or not validation.get("report_sha256"):
+            raise ValueError("Registration receipt requires spatial alignment, hemisphere-order checks and a report hash")
+        return {**base, **receipt, "verified": True, "decision_eligible": False,
+                "status": "reviewed_registration_transfer_unvalidated", "receipt_sha256": _sha256(path),
+                "reason": "Spatial registration has an external review receipt; transfer to TRIBE and emotion decision validity remain unvalidated."}
+    except (ValueError, KeyError, TypeError, FileNotFoundError) as exc:
+        return {**base, "status": "invalid_registration_receipt", "reason": str(exc), "receipt_sha256": _sha256(path)}
+
+
 def status() -> dict:
     required = [
         _source() / f"mean_3comp_{emotion}_group_emotion_PLS_beta_BSz_10000it.{suffix}"
@@ -68,6 +112,8 @@ def status() -> dict:
     return {
         "status": "experimental_ready" if not missing else "missing_assets",
         "profile": PROFILE,
+        "registration": registration(),
+        "decision_eligible": False,
         "missing": missing,
         "mesh": "fsaverage5",
         "hemisphere_order": list(HEMISPHERES),
@@ -141,6 +187,10 @@ def _sample_volume(volume_path: Path) -> tuple[np.ndarray, float]:
     if data.ndim != 3 or not np.isfinite(affine).all() or abs(float(np.linalg.det(affine))) < 1e-12:
         raise ValueError(f"Invalid Kragel volume or affine {volume_path.name}")
     inverse = np.linalg.inv(affine)
+    registration_state = registration()
+    if registration_state["status"] == "invalid_registration_receipt":
+        raise ValueError(registration_state["reason"])
+    transform = np.asarray(registration_state["surface_to_volume_world"], dtype=np.float64)
     hemispheres = []
     coverages = []
     for hemisphere in HEMISPHERES:
@@ -149,7 +199,7 @@ def _sample_volume(volume_path: Path) -> tuple[np.ndarray, float]:
         samples = []
         for depth in RIBBON_DEPTHS:
             world = white * (1.0 - depth) + pial * depth
-            vox = (inverse @ np.c_[world, np.ones(len(world))].T).T[:, :3]
+            vox = (inverse @ transform @ np.c_[world, np.ones(len(world))].T).T[:, :3]
             samples.append(_trilinear(data, vox))
         stacked = np.stack(samples)
         valid = np.isfinite(stacked)
@@ -196,7 +246,8 @@ def cache_manifest() -> dict:
         "profile": PROFILE,
         "projection": {
             "version": PROJECTION_VERSION,
-            "affine_policy": "voxel = inverse(volume_affine) @ fsaverage_world",
+            "affine_policy": "voxel = inverse(volume_affine) @ explicit_surface_to_volume_world @ surface_RAS",
+            "registration": registration(),
             "ribbon_depths": list(RIBBON_DEPTHS),
             "nonfinite_policy": "mask invalid corners and vertices; finite weighted mean only",
         },
@@ -314,6 +365,25 @@ def _time_axis(times: list[float], durations: list[float] | None, source_duratio
     return axis, duration, lengths
 
 
+def decode_source_supported(response: np.ndarray, times: list[float], durations: list[float], source_duration: float) -> dict:
+    """Exclude padded TRIBE windows with no overlap with the actual stimulus."""
+    if len(response) != len(times) or len(times) != len(durations):
+        raise ValueError('TRIBE interval lengths do not match response rows')
+    if not np.isfinite(source_duration) or source_duration <= 0:
+        raise ValueError('Source duration must be finite and positive')
+    if any(not np.isfinite(t) or t < 0 for t in times) or any(not np.isfinite(d) or d <= 0 for d in durations):
+        raise ValueError('Invalid original TRIBE intervals')
+    indices = [i for i, start in enumerate(times) if start < source_duration]
+    if not indices:
+        raise ValueError('No TRIBE interval overlaps the source')
+    starts = [times[i] for i in indices]
+    lengths = [min(durations[i], source_duration-times[i]) for i in indices]
+    result = decode(np.asarray(response)[indices], starts, lengths, source_duration)
+    result['excluded_padding_rows'] = [i for i in range(len(times)) if i not in indices]
+    result['time_note'] = 'Diagnostic support is clipped to the actual source; zero-overlap padded rows are excluded. Raw TRIBE windows remain in cortical evidence.'
+    return result
+
+
 def decode(response: np.ndarray, times: list[float], durations: list[float] | None = None, source_duration: float | None = None) -> dict:
     x = validate_response(response)
     if len(times) != len(x):
@@ -331,16 +401,18 @@ def decode(response: np.ndarray, times: list[float], durations: list[float] | No
     aggregate = {emotion: float(np.mean(values)) for emotion, values in trajectories.items()}
     top = max(aggregate, key=aggregate.get)
     return {
+        "registration_verified": provenance["projection"]["registration"]["verified"],
+        "decision_eligible": False, "cannot_be_used_for_decisions": True,
         "status": "experimental", "evaluator": "Kragel 2015 BPLS emotion signatures", "profile": PROFILE,
         "source_kind": "tribe_derived", "labels": list(EMOTIONS), "times": [float(value) for value in times],
         "segment_durations": segment_durations, "source_duration": duration, "time_axis": axis,
         "trajectories": trajectories, "aggregate": aggregate, "top_pattern": top,
         "hemisphere_order": list(HEMISPHERES), "ribbon_depths": list(RIBBON_DEPTHS),
         "provenance": provenance,
-        "interpretation": "Spatial pattern-expression correlations between TRIBE-predicted cortical activity and Kragel 2015 emotion signatures.",
+        "interpretation": "Diagnostic spatial pattern-expression correlations. Registration and transfer validation are separate requirements; these outputs are not eligible for optimization decisions.",
         "limitations": [
             "Experimental model-to-model transfer, not a calibrated probability or observed viewer emotion.",
             "Kragel signatures were derived from measured fMRI; transfer to TRIBE synthetic predictions is not independently validated.",
-            "Published MNI volumes are sampled through the inverse affine onto the fsaverage5 white-to-pial ribbon; no arbitrary surface-index resampling is used.",
+            "The complete surface-to-volume spatial registration is unverified unless an exact-asset review receipt is present; inverse volume affine alone is not registration.",
         ],
     }

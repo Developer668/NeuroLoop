@@ -14,7 +14,10 @@ from neuroloop.db import Evaluation, Experiment, Project, Run, Session, now, uid
 @pytest.fixture(autouse=True)
 def allow_model_free_optional_readouts(monkeypatch):
     """Controller tests do not load optional TSAM/Kragel model assets."""
-    from neuroloop import services
+    from neuroloop import services, kragel
+
+    # Explicit controller fixture, not a claim about the actual registration.
+    monkeypatch.setattr(kragel, "registration", lambda: {"decision_eligible": True})
 
     monkeypatch.setattr(services, 'readout_asset_status', lambda root=None: {
         'tsam': {'ready': True, 'missing': []},
@@ -274,7 +277,7 @@ def test_external_agent_closed_loop_uses_recorded_fixture_evidence_only(client, 
                 'values': {'happiness': value},
                 'sources': {},
                 'source_weights': {},
-                'active_sources': ['fixture'],
+                'decision_eligible': True, 'active_sources': ['fixture'],
                 'disagreement': {},
                 'mean_disagreement': None,
                 'confidence': 'fixture',

@@ -1,10 +1,10 @@
 # Sponsor integrations
 
-Status after the September 10 crash recovery. No cloud compute has been provisioned.
+Updated September 11 after fresh CPU execution and actual Molab setup. No CoreWeave compute has been provisioned; Molab runs only the sanitized plotting notebook on its default CPU runtime.
 
 | Tool | Actual state | Role |
 |---|---|---|
-| marimo | Local app on port 2718, browser-verified | Reads real SQLite records, saved cortical timelines and experiment charts |
+| marimo / Molab | Local app on port 2718 and actual saved hosted notebook, browser-verified | Local live ledger; hosted sanitized snapshot with eleven chart views |
 | Weave | Credentialed; actual remote traces and readback verified | Durable export of selected numerical evidence and execution metadata |
 | W&B Models | Actual run metadata published | Gives ARIA real experiment context and records Launch results |
 | ARIA | Actual research review completed | Inspects history and proposes a permitted next experiment |
@@ -17,7 +17,7 @@ Status after the September 10 crash recovery. No cloud compute has been provisio
 ## Weave: open the actual result
 
 [NeuroLoop W&B project](https://wandb.ai/jerry-wen0616-santa-clara-university/neuroloop).
-[Verified trace](https://wandb.ai/jerry-wen0616-santa-clara-university/neuroloop/weave/calls/1c6d3e1b-1a09-4eae-b6a8-84490afff8c6).
+[Fresh audio trace](https://wandb.ai/jerry-wen0616-santa-clara-university/neuroloop/weave/calls/562f0b92-9d69-46cd-bf32-8d4306ac05cf), independently read back through the official W&B MCP with matching local run/evaluation IDs.
 
 Credentials are already in the private root `.env`; do not paste or commit them. `WANDB_PROJECT` is `entity/project` for Weave. W&B Models/Launch helpers split it into entity and project inside their process because that SDK rejects slash-containing project names.
 
@@ -41,11 +41,13 @@ ARIA and Weave serve different purposes here: ARIA proposes a research action fr
 
 ## marimo
 
-http://localhost:2718 is the actual local marimo application. `research/lab.py` reads the real ledger, and `research/charts.py` supplies measured change, operator outcomes, search trajectory, parallel coordinates, compute efficiency, run reliability and operator experience. Existing tables and cortical timelines remain available. Empty selections display absence of data, not fabricated examples. Molab tutorials informed plotting; no project database or source media was uploaded to Molab.
+http://localhost:2718 is the actual local marimo application. `research/lab.py` reads the real ledger, and `research/charts.py` supplies measured change, operator outcomes, search trajectory, parallel coordinates, compute efficiency, run reliability and operator experience. Existing tables and cortical timelines remain available. Empty selections display absence of data, not fabricated examples.
+
+The actual [Molab notebook](https://molab.marimo.io/notebooks/nb_B79BrKA5Rh4UNJxj9NQ1kf) was created, executed, saved and browser-verified in the user's account. It contains sanitized historical numerical records and the fresh TSAM CPU result across eleven chart views. No project database, source media or credentials were uploaded. This is a snapshot, not an automatic connection to the local database. See [MOLAB.md](MOLAB.md).
 
 ## Deferred integrations
 
-`NEUROLOOP_PLANNER_ENABLED=false` remains in effect. W&B Inference will be connected later; no paid planner request or free-form chat model is enabled. The dedicated Neuro page runs documented local evidence commands and links to MCP. Kragel and TSAM retain optional integration scaffolding, but their assets are absent from the current checkout; capability status reports them missing and requests fail closed until they are installed and validated. CoreWeave generation/compute, Ideogram 4, MiniMax H3 and TypeSafe remain unavailable until the corresponding access is actually configured.
+`NEUROLOOP_PLANNER_ENABLED=false` remains in effect. W&B Inference will be connected later; no paid planner request or free-form chat model is enabled. The dedicated Neuro page runs documented local evidence commands and links to MCP. Kragel and TSAM adapters and assets are present on this Windows disk; current capabilities report experimental readiness, with scientific validation still unpassed. See CURRENT-INTEGRATION-AUDIT.md for recomputed hashes and registration limitations. CoreWeave generation/compute, Ideogram 4, MiniMax H3 and TypeSafe remain unavailable until the corresponding access is actually configured.
 
 Official references: [Weave](https://docs.wandb.ai/weave/quickstart), [ARIA](https://docs.wandb.ai/aria/overview), [Launch](https://docs.wandb.ai/platform/launch/create-and-deploy-jobs), [W&B MCP](https://github.com/wandb/wandb-mcp-server), [marimo plotting](https://docs.marimo.io/api/plotting/).
 
@@ -53,8 +55,7 @@ Official references: [Weave](https://docs.wandb.ai/weave/quickstart), [ARIA](htt
 
 The response-target loop does not depend on sponsor generation credits. Local controlled
 interventions, TRIBE, the experiment ledger, website and NeuroLoop MCP retain the
-TRIBE-only workflow. Kragel and TSAM are future optional branches and cannot be
-included until their assets and validation evidence are supplied.
+TRIBE-only workflow. Kragel and TSAM are optional experimental branches. Their local assets are present; their scientific validation and registration requirements remain open.
 
 Sponsor-dependent creative generation is deliberately not claimed as implemented:
 

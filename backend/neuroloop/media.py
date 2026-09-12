@@ -145,7 +145,9 @@ def thumbnail(path: Path, kind: str, destination: Path) -> bool:
     return False
 
 def static_presentation(path: Path, destination: Path, seconds: int) -> Path:
-    execute(['-y','-loop','1','-i',str(path),'-t',str(seconds),'-vf','scale=640:-2:force_original_aspect_ratio=decrease,pad=ceil(iw/2)*2:ceil(ih/2)*2','-r','12','-an','-c:v','libx264','-preset','fast','-pix_fmt','yuv420p',str(destination)])
+    # Lossless intra frames make the standardized still presentation exactly
+    # constant after decoding, avoiding compression-induced temporal changes.
+    execute(['-y','-loop','1','-i',str(path),'-t',str(seconds),'-vf','scale=640:-2:force_original_aspect_ratio=decrease,pad=ceil(iw/2)*2:ceil(ih/2)*2','-r','12','-an','-c:v','libx264','-preset','fast','-crf','0','-g','1','-pix_fmt','yuv420p',str(destination)])
     return destination
 
 def render_filter(source: Path,destination: Path,operator: str) -> Path:

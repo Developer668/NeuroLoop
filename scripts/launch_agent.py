@@ -22,12 +22,18 @@ from wandb.sdk.launch._launch import resolve_agent_config
 from wandb.analytics import TelemetryRecorder
 
 manifest=json.loads((ROOT/'infrastructure/launch/installed.json').read_text())
+selected_proposal=os.getenv('NEUROLOOP_LAUNCH_ONE_PROPOSAL')
+if selected_proposal:
+    dedicated_queue=os.getenv('NEUROLOOP_LAUNCH_DEDICATED_QUEUE','')
+    if dedicated_queue!='neuroloop-accept-'+selected_proposal:
+        raise ValueError('One-shot acceptance requires its own proposal-specific queue')
+    manifest['queue']=dedicated_queue
 os.environ['WANDB_PROJECT']=manifest['project'];os.environ['WANDB_ENTITY']=manifest['entity']
 
 def validate_spec(spec):
     from neuroloop.execution_guard import require_execution_enabled
     require_execution_enabled()
-    return check_spec(spec,manifest,get_proposal)
+    return check_spec(spec,manifest,get_proposal,selected_proposal)
 
 class BoundedSubmittedRun(LocalSubmittedRun):
     def __init__(self,identity):
@@ -59,6 +65,18 @@ def runner(name,api,config,environment,registry):
     return BoundedRunner(api,config)
 
 class BoundedAgent(LaunchAgent):
+    _claimed_once=False
+    _selected_finished=False
+    async def task_run_job(self,*args,**kwargs):
+        try:return await super().task_run_job(*args,**kwargs)
+        finally:self._selected_finished=True
+    async def get_job_and_queue(self):
+        if selected_proposal and self._claimed_once:
+            if self._selected_finished:raise KeyboardInterrupt
+            return None
+        job=await super().get_job_and_queue()
+        if job is not None:self._claimed_once=True
+        return job
     def _assert_secure(self,spec):
         super()._assert_secure(spec);validate_spec(spec)
 

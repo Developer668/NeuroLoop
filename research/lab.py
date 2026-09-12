@@ -10,7 +10,11 @@ def _():
     import sqlite3,json
     from pathlib import Path
     import plotly.graph_objects as go
-    return mo,pd,sqlite3,json,Path,go
+    import sys
+    chart_path=Path(__file__).resolve().parent
+    if str(chart_path) not in sys.path: sys.path.insert(0,str(chart_path))
+    from charts import experiment_figures,cortical_figures,CHART_GUIDANCE
+    return mo,pd,sqlite3,json,Path,go,experiment_figures,cortical_figures,CHART_GUIDANCE
 
 @app.cell
 def _(mo):
@@ -36,7 +40,10 @@ def _(Path,sqlite3,pd,refresh):
         stats=pd.read_sql_query('SELECT context, operator, successes, failures, total_gain, total_seconds FROM policy_stats',connection)
         connection.close()
     else:
-        runs,experiments,evaluations,stats=[pd.DataFrame() for _ in range(4)]
+        runs=pd.DataFrame(columns=['id','project','status','compute_seconds','evaluations_used'])
+        experiments=pd.DataFrame(columns=['run_id','sequence','operator','baseline_score','candidate_score','decision','evidence'])
+        evaluations=pd.DataFrame(columns=['id','creative','evidence'])
+        stats=pd.DataFrame(columns=['context','operator','successes','failures','total_gain','total_seconds'])
     return root,runs,experiments,evaluations,stats
 
 @app.cell
@@ -57,15 +64,12 @@ def _(mo,evaluations):
     return (selected,)
 
 @app.cell
-def _(mo,selected,evaluations,json,go):
+def _(mo,selected,evaluations,json,cortical_figures):
     if selected.value and not evaluations.empty:
         record=evaluations[evaluations.id==selected.value].iloc[0]
         evidence=json.loads(record['evidence'])
-        figure=go.Figure()
-        for label,key,color in [('Left hemisphere','left_mean','#147a82'),('Right hemisphere','right_mean','#398795')]:
-            figure.add_trace(go.Scatter(x=evidence['times'],y=evidence[key],mode='lines+markers',name=label,line={'color':color}))
-        figure.update_layout(template='plotly_white',paper_bgcolor='#ffffff',plot_bgcolor='#ffffff',title='Saved cortical mean by hemisphere',xaxis_title='Official segment start (seconds)',yaxis_title='Predicted model response units',height=400)
-        display=mo.vstack([mo.ui.plotly(figure),mo.md('**Interpretation:** hemispheric means summarize predicted cortical values. They are not measured attention or emotional probabilities.'),mo.accordion({'Full numerical provenance':mo.json(evidence)})])
+        cortical_charts=cortical_figures(evidence)
+        display=mo.vstack([mo.ui.tabs({name:mo.ui.plotly(fig) for name,fig in cortical_charts.items()}) if cortical_charts else mo.md('This record has no complete finite hemisphere timeline.'),mo.md('**Read the charts:** each point or heatmap column is a saved segment start in the stimulus, not model processing time. The heatmap shows two hemisphere means, not individual cortical locations. Blue indicates negative model-response units; orange indicates positive units. Its symmetric scale is selected for this evaluation, so compare numerical legends across records. These predictions are not measured attention or emotion probabilities.'),mo.accordion({'Full numerical provenance':mo.json(evidence)})])
     else:
         display=mo.md('Choose an evaluation to inspect its actual saved cortical timeline.')
     display
@@ -96,15 +100,11 @@ def _(mo,runs):
     return (project_filter,)
 
 @app.cell
-def _(mo,Path,runs,experiments,stats,project_filter):
-    import sys
-    chart_path=Path(__file__).resolve().parent
-    if str(chart_path) not in sys.path: sys.path.insert(0,str(chart_path))
-    from charts import experiment_figures
+def _(mo,runs,experiments,stats,project_filter,experiment_figures,CHART_GUIDANCE):
     filtered_runs=runs if project_filter.value=='all' else runs[runs.project==project_filter.value]
     filtered_experiments=experiments[experiments.run_id.isin(filtered_runs.id)]
     figures=experiment_figures(filtered_runs,filtered_experiments,stats if project_filter.value=='all' else stats.iloc[0:0])
-    mo.vstack([mo.md(f'**{len(filtered_runs)} runs / {len(filtered_experiments)} interventions** in this selection. Costs refer to whole runs, not attributed per-edit compute.'),mo.ui.tabs({name:mo.ui.plotly(fig) for name,fig in figures.items()}) if figures else mo.md('No recorded data matches this filter.'),mo.md('**Parallel coordinates:** drag vertically along an axis to brush a range; double-click to clear. Mean gain and observed outcomes describe this sample only. Operator experience aggregates all retained contexts and is shown only with All recorded projects.')])
+    mo.vstack([mo.md(f'**{len(filtered_runs)} runs / {len(filtered_experiments)} interventions** in this selection. Costs refer to whole runs, not attributed per-edit compute.'),mo.ui.tabs({name:mo.vstack([mo.md(CHART_GUIDANCE[name]),mo.ui.plotly(fig)]) for name,fig in figures.items()}) if figures else mo.md('No recorded data matches this filter. Upload a creative in the workspace and return after a permitted evaluation has completed; this notebook never starts inference.'),mo.md('**Parallel coordinates:** drag vertically along an axis to brush a range; double-click to clear. Mean gain and observed outcomes describe this sample only. Operator experience aggregates all retained contexts and is shown only with All recorded projects.')])
     return
 
 if __name__=='__main__':app.run()

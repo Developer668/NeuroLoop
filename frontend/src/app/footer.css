@@ -213,3 +213,15 @@
 [data-motion="reduced"] .background-paths .bg-path {
   animation: none;
 }
+
+/* Keep the editorial footer, with a smaller footprint and no bubble CTA. */
+.motion-footer { padding-top: 48px; }
+.footer-opening h2 { font-size: clamp(40px, 5vw, 72px); margin: 20px 0 28px; }
+.footer-marquee { margin-top: 4px; margin-bottom: 28px; padding: 12px 0; }
+.footer-marquee span { font-size: clamp(16px, 1.7vw, 24px); }
+.footer-links { gap: 24px; }
+.footer-links nav { gap: 8px; }
+.footer-wordmark-window { margin-top: 26px; }
+.footer-wordmark { font-size: clamp(50px, 10vw, 150px); }
+.footer-legal { margin-top: 15px; padding-top: 16px; }
+@media (max-width: 700px) { .motion-footer { padding-top: 32px; } .footer-opening h2 { font-size: 44px; margin: 18px 0 26px; } .footer-links { gap: 18px; } .footer-wordmark-window { margin-top: 22px; } }

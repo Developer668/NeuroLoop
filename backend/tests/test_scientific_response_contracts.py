@@ -70,7 +70,7 @@ def test_source_only_and_unsupported_dimensions_are_explicit():
     report = ensemble({'tsam': tsam_result([{'start': 0, 'end': 5, 'logits': logits(happiness=4)}], duration=5)})
     assert report['active_sources'] == ['tsam']
     assert report['values']['happiness'] is not None
-    kragel = {'status': 'experimental', 'aggregate': {'amused': 1, 'angry': 0, 'content': 0, 'fearful': 0, 'neutral': 0, 'sad': 0, 'surprised': 0}}
+    kragel = {'registration_verified':True,'transfer_validated':True,'decision_eligible':True,'status': 'experimental', 'aggregate': {'amused': 1, 'angry': 0, 'content': 0, 'fearful': 0, 'neutral': 0, 'sad': 0, 'surprised': 0}}
     report = ensemble({'kragel': kragel})
     assert report['active_sources'] == ['kragel']
     assert report['sources']['kragel']['contempt'] is None

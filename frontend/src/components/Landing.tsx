@@ -8,7 +8,6 @@ import {
   AudioLines,
   FileText,
   Film,
-  MoveUpRight,
   Braces,
   Check,
   ScanLine,
@@ -108,10 +107,7 @@ export default function Landing() {
       <section className="landing-hero">
         <div className="hero-copy-new" data-reveal>
           <span className="eyebrow">THE CREATIVE EXPERIMENT ENGINE</span>
-          <h1>
-            Great creative.
-            <br />A closer <span>look.</span>
-          </h1>
+          <h1>Great creative.<br /><span>A closer look.</span></h1>
           <p>
             Explore how your creative is predicted to engage the cortex. Test a
             deliberate change. Follow the evidence to your next version.
@@ -157,7 +153,7 @@ export default function Landing() {
             <ScanLine size={22} />
           </div>
           <span className="observatory-note">
-            Anatomical surface · drag to explore
+            Anatomical reference · fsaverage5 cortical surface
           </span>
         </div>
       </section>
@@ -180,13 +176,13 @@ export default function Landing() {
         <div className="section-intro" data-reveal>
           <span className="eyebrow">A CLEARER WAY FORWARD</span>
           <h2>
-            From a good instinct
+            Keep the original.
             <br />
-            to a considered decision.
+            Question the next version.
           </h2>
           <p>
-            A focused loop for creative work. Start with what you have. Change
-            what you can explain.
+            One original. One deliberate change. A record of what happened.
+            Compare predictions on the same basis before deciding what to keep.
           </p>
         </div>
         <div className="process-steps">
@@ -257,6 +253,18 @@ export default function Landing() {
           </article>
         </div>
       </section>
+      <section className="evidence-path" aria-labelledby="evidence-path-title" data-reveal>
+        <div>
+          <span className="eyebrow">FOLLOW THE EVIDENCE</span>
+          <h2 id="evidence-path-title">One experiment.<br />Three ways to inspect it.</h2>
+          <p>Move from a moment in the creative to the complete record of the run.</p>
+        </div>
+        <div className="evidence-path-links">
+          <Link href="/workspace?view=brain"><span className="evidence-path-number">01</span><div><strong>The response</strong><p>Explore the predicted cortical surface and its timeline in Brain Lab.</p></div><ArrowUpRight size={19} /></Link>
+          <Link href="/workspace?view=research"><span className="evidence-path-number">02</span><div><strong>The comparison</strong><p>Inspect saved evaluations, charts and the local research ledger.</p></div><ArrowUpRight size={19} /></Link>
+          <Link href="/workspace?view=connections"><span className="evidence-path-number">03</span><div><strong>The execution</strong><p>Review integration status and connect your agent to the same services.</p></div><ArrowUpRight size={19} /></Link>
+        </div>
+      </section>
       <section className="agent-section" id="for-agents">
         <div data-reveal>
           <span className="eyebrow">YOUR WORKFLOW, CONNECTED</span>
@@ -282,17 +290,17 @@ export default function Landing() {
             <span />
             <span />
             <span />
-            <small>NeuroLoop / MCP tool sequence</small>
+            <small>NeuroLoop / example MCP sequence</small>
           </div>
           <div className="terminal-content">
             <small>DISCOVER</small>
-            <code>get_capabilities()</code>
+            <code><span className="syntax-function">get_capabilities</span><span className="syntax-punctuation">(</span><span className="syntax-argument"></span><span className="syntax-punctuation">)</span></code>
             <small>EXPERIMENT</small>
-            <code>evaluate_creative(project_id)</code>
-            <code>run_experiment(project_id, operator)</code>
+            <code><span className="syntax-function">evaluate_creative</span><span className="syntax-punctuation">(</span><span className="syntax-argument">project_id</span><span className="syntax-punctuation">)</span></code>
+            <code><span className="syntax-function">optimize_creative</span><span className="syntax-punctuation">(</span><span className="syntax-argument">project_id, max_evaluations=4</span><span className="syntax-punctuation">)</span></code>
             <small>REVIEW & EXPORT</small>
-            <code>get_evidence(evaluation_id)</code>
-            <code>export_result(run_id)</code>
+            <code><span className="syntax-function">get_evidence</span><span className="syntax-punctuation">(</span><span className="syntax-argument">evaluation_id</span><span className="syntax-punctuation">)</span></code>
+            <code><span className="syntax-function">export_result</span><span className="syntax-punctuation">(</span><span className="syntax-argument">run_id</span><span className="syntax-punctuation">)</span></code>
             <div className="terminal-note">
               Authenticated. Bounded. Traceable.
             </div>

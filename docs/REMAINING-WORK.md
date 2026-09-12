@@ -1,6 +1,8 @@
 # Remaining work and release gates
 
-Current execution is paused after repeated Windows 0x113 graphics crashes. Review and preserve evidence before further model work. This table distinguishes completed implementation from unpassed acceptance.
+Latest: [loop design and verified Weave repair](AGENTIC-LOOP-REVIEW.md), [TSAM metadata and scientific validation audit](SCIENTIFIC-VALIDATION-AUDIT.md). The user has excluded graphics-crash diagnosis from the present work; the existing GPU hold is preserved. CPU-only acceptance tooling does not itself establish Launch acceptance.
+
+General GPU/Launch execution is paused after repeated Windows 0x113 graphics crashes. Fresh bounded CPU-only verification now works without changing that hold; see [fresh execution](FRESH-EXECUTION.md). This table distinguishes completed implementation from unpassed acceptance.
 
 | Work | Current state | Evidence still required |
 |---|---|---|
@@ -13,8 +15,8 @@ Current execution is paused after repeated Windows 0x113 graphics crashes. Revie
 | Capability/documentation drift | Current hold, hardware and agent heartbeat checks; weight presence separated from inference proof | Keep statuses tied to new evidence when runtime/model versions change |
 | Quantization accuracy | Historical local quantized-inference evidence exists; runtime-local weights are not included in this checkout | Representative held-out original-versus-quantized comparison, per-modality metrics and acceptance thresholds |
 | Commercial permissions | Unresolved | Documented rights for intended use of upstream models, software and datasets; TRIBE/TSAM restrictions remain relevant |
-| Kragel registration/scoring | **Install-later scaffold only.** The current checkout has no Kragel source volumes; capability status is missing and requests fail closed | Supply the seven volume pairs, verify registration/scoring and geometry, reproduce reference scores, then test measured-fMRI to synthetic-TRIBE transfer |
-| TSAM integration | **Install-later scaffold only.** The current checkout has no checkpoint or pinned source tree; capability status is missing and requests fail closed | Supply the checkpoint/source, verify strict eight-class CPU loading and five-second audiovisual preprocessing, then complete scientific validation and calibration |
+| Kragel registration/scoring | Adapter and seven source volume pairs present; manifest hashes verified. Experimental readiness does not establish registration or transfer validity | The volumes already exist. Establish a provenance-bound surface-to-volume registration, reproduce original reference scoring, then test measured-fMRI to synthetic-TRIBE transfer |
+| TSAM integration | Fresh Windows strict loading and audiovisual CPU forward pass succeeded in 4.422 seconds, with eight finite logits | Confirm class mapping, reproduce held-out metrics, review leakage and calibrate on the intended domain; one technical clip is not validation |
 | W&B Inference / web AI conversation | **User deferred.** No LLM request enabled | Later provider credentials/access, agreed sharing policy and constrained-planner acceptance; web chat needs its own actual conversational contract |
 | CoreWeave compute/storage | Awaiting sponsor credits/access; local device only | Explicit cloud authorization, runtime/storage, budget and live acceptance test |
 | TypeSafe | Deferred; no runtime call | Agreed provider contract and implementation |

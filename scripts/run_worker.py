@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'backend'))
+from neuroloop import execution_guard  # Latch the explicit CPU-only scope before torch imports.
 from neuroloop.worker import main, process
 if __name__=='__main__':
     import argparse

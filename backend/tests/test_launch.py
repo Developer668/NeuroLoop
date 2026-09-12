@@ -26,3 +26,8 @@ def test_remote_overrides_cannot_execute(key,value):
 def test_unapproved_proposal_rejected():
     with pytest.raises(ValueError,match='approved'):
         validate_spec(SPEC,MANIFEST,lambda _: {'status':'proposed'})
+
+def test_one_shot_cannot_claim_another_approved_proposal():
+    with pytest.raises(ValueError,match='selected proposal'):
+        validate_spec(SPEC,MANIFEST,approved,expected_proposal='different-id')
+    assert validate_spec(SPEC,MANIFEST,approved,expected_proposal='approved-id')['status']=='approved'

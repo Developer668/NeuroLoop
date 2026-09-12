@@ -217,7 +217,7 @@ const TOOLS = [
   ["export_result", "Get authorized asset and evidence paths."],
 ];
 export function ConnectionsView() {
-  const [codeTab, setCodeTab] = useState<"codex" | "json">("codex");
+  const [codeTab, setCodeTab] = useState<"codex" | "json" | "stdio">("codex");
   const [copied, setCopied] = useState(false),
     [error, setError] = useState(""),
     [testing, setTesting] = useState(false),
@@ -257,7 +257,11 @@ export function ConnectionsView() {
   );
   const command =
     'codex mcp add neuroloop -- "D:\\NeuroLoop\\.runtimes\\app\\Scripts\\python.exe" "D:\\NeuroLoop\\scripts\\mcp_stdio.py"';
-  const code = codeTab === "codex" ? command : config;
+  const stdio = JSON.stringify({mcpServers: {neuroloop: {
+    command: "D:\\NeuroLoop\\.runtimes\\app\\Scripts\\python.exe",
+    args: ["D:\\NeuroLoop\\scripts\\mcp_stdio.py"]
+  }}}, null, 2);
+  const code = codeTab === "codex" ? command : codeTab === "stdio" ? stdio : config;
   async function copy() {
     try {
       await navigator.clipboard.writeText(code);
@@ -342,17 +346,18 @@ export function ConnectionsView() {
             >
               HTTP client JSON
             </button>
+            <button className="button" aria-pressed={codeTab === "stdio"} onClick={() => setCodeTab("stdio")}>Desktop stdio JSON</button>
           </div>
           <button className="copy-btn" onClick={() => void copy()}>
             {copied ? <Check size={12} /> : <Copy size={12} />}{" "}
             {copied ? "Copied" : "Copy"}
           </button>
           <pre>
-            <code>{code}</code>
+            <code>{code.split(/("[^"\n]*"|\b(?:codex|mcp|add)\b)/g).map((part, i) => <span key={i} className={part.startsWith('"') ? (code.slice(code.indexOf(part) + part.length).trimStart().startsWith(":") ? "code-token-key" : "code-token-string") : /^(codex|mcp|add)$/.test(part) ? "code-token-command" : undefined}>{part}</span>)}</code>
           </pre>
           <p style={{ fontSize: 10, color: "#9fbfcb", marginTop: 15 }}>
-            {codeTab === "codex"
-              ? "Run this command once on this computer, then reload MCP connections in Codex. The local stdio connection needs no copied token. Start NeuroLoop before asking an agent to run inference."
+            {codeTab !== "json"
+              ? "Use this local stdio configuration (or CLI command) with a compatible desktop MCP client. Adjust paths if installed elsewhere. Run the CLI command once on this computer, then reload MCP connections in Codex. The local stdio connection needs no copied token. Start NeuroLoop before asking an agent to run inference."
               : "This is a template. Download client config for an expiring authenticated HTTP configuration."}
           </p>
         </div>
@@ -442,6 +447,13 @@ export function ResearchView({ data }: { data: Dashboard }) {
   return (
     <div className="stack">
       <ResearchEvidence />
+      <Panel title="Interactive notebook" description="Live local marimo: recorded experiments, hemisphere heatmaps, runtime and reliability. No cloud session starts here.">
+        <div className="panel-body">
+          <details><summary>Open charts and tables inside the workspace</summary>
+            <iframe title="Live local marimo charts and logs" src="http://localhost:2718/" loading="lazy" style={{ width: "100%", height: 850, border: "1px solid var(--line)", borderRadius: 8 }} />
+          </details>
+        </div>
+      </Panel>
       {error && <div className="notice error">{error}</div>}
       <Panel
         title="Operator experience · all recorded history"
@@ -495,22 +507,27 @@ export function ResearchView({ data }: { data: Dashboard }) {
               <External href="http://localhost:2718">
                 Open local research application
               </External>
+              <External href="https://molab.marimo.io/notebooks/nb_B79BrKA5Rh4UNJxj9NQ1kf">
+                Open Molab evidence notebook
+              </External>
             </div>
             <div className="system-block">
-              Start the research service using the project launcher. Data
-              remains local; do not publish private content to an unlisted
-              notebook.
+              Local research reads the live workspace. Molab contains a saved,
+              sanitized numerical snapshot with eleven chart views and requires
+              access to the notebook owner's account. It does not synchronize
+              automatically or contain source media.
             </div>
           </div>
         </Panel>
         <Panel title="ARIA research supervisor">
           <div className="panel-body">
-            <Badge value="requires_launch_setup" />
+            <Badge value={data.capabilities.execution?.paused ? "paused" : "check_connections"} />
             <p className="status-detail section-space">
-              ARIA can review versioned W&B evidence and launch approved
-              follow-up jobs once W&B Launch credentials, a queue, and an active
-              Launch agent are configured. It cannot change this run’s objective
-              or budget.
+              ARIA has reviewed recorded experiment evidence. The restricted
+              Launch bridge is installed, but its full experiment acceptance
+              remains unfinished after the graphics crash. Check connections
+              for current agent readiness. ARIA cannot change the local
+              objective or budget.
             </p>
             <div className="section-space">
               <External href="https://docs.wandb.ai/aria/autoresearch">
@@ -527,6 +544,11 @@ export function SettingsView({ data }: { data: Dashboard }) {
   const c = data.capabilities;
   return (
     <div className="stack">
+      <div className="settings-status">
+        <div><small>Execution</small><strong>{c.execution?.paused ? "Paused for stability review" : "Available"}</strong></div>
+        <div><small>Deployment</small><strong>Local, single workspace</strong></div>
+        <div><small>Appearance</small><strong>Switch light / dark in the sidebar</strong></div>
+      </div>
       <ProfileSettings />
       <div className="grid-two">
         <Panel

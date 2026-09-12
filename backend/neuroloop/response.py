@@ -476,6 +476,15 @@ def _ensemble_provenance(results: Mapping[str, Mapping[str, Any] | None], weight
     }
 
 
+def kragel_decision_eligible(result: Mapping[str, Any] | None) -> bool:
+    """Missing historical flags fail closed; geometry alone is insufficient."""
+    return bool(isinstance(result, Mapping)
+                and result.get("registration_verified") is True
+                and result.get("transfer_validated") is True
+                and result.get("decision_eligible") is True
+                and result.get("cannot_be_used_for_decisions") is not True)
+
+
 def ensemble(evidence: dict[str, Any], *, weights: Mapping[str, Any] | None = None, profile: str = ENSEMBLE_PROFILE) -> dict[str, Any]:
     """Combine available sources under a fixed, versioned profile."""
     if not isinstance(evidence, Mapping):
@@ -491,7 +500,8 @@ def ensemble(evidence: dict[str, Any], *, weights: Mapping[str, Any] | None = No
     if isinstance(kragel_result, Mapping) and kragel_result.get("source_kind") not in (None, "tribe_derived"):
         raise ValueError("Kragel evidence must remain TRIBE-derived evidence")
     tsam = tsam_relative(tsam_result) if tsam_result and tsam_result.get("status") == "experimental" else None
-    kragel = kragel_relative(kragel_result) if kragel_result and kragel_result.get("status") == "experimental" else None
+    kragel_diagnostic = kragel_relative(kragel_result) if kragel_result and kragel_result.get("status") == "experimental" else None
+    kragel = kragel_diagnostic if kragel_decision_eligible(kragel_result) else None
     tsam_rows = tsam_series(tsam_result) if tsam is not None else []
     kragel_rows = kragel_series(kragel_result) if kragel is not None else []
     active = [name for name, value in (("tsam", tsam), ("kragel", kragel)) if value is not None]
@@ -505,6 +515,10 @@ def ensemble(evidence: dict[str, Any], *, weights: Mapping[str, Any] | None = No
     results = {"tsam": tsam_result, "kragel": kragel_result}
     return {
         "version": ENSEMBLE_VERSION, "profile": profile, "values": values,
+        "decision_eligible": bool(active),
+        "source_eligibility": {"tsam": tsam is not None, "kragel": kragel_decision_eligible(kragel_result)},
+        "diagnostic_sources": {"kragel": kragel_diagnostic},
+        "excluded_sources": {"kragel": "Registration and TRIBE transfer validation required"} if kragel_diagnostic is not None and kragel is None else {},
         "sources": {"tsam": tsam, "kragel": kragel},
         "source_semantics": {"tsam": "direct_media", "kragel": "tribe_derived"},
         "source_weights": {name: configured[name] if name in active else 0.0 for name in configured},
@@ -632,6 +646,10 @@ def target_score(report: dict | None, target: dict | Any | None) -> dict | None:
     target merely by improving another segment.
     """
     if not report or not isinstance(report, Mapping):
+        return None
+    if report.get("decision_eligible") is not True:
+        return None
+    if "kragel" in (report.get("active_sources") or []) and (report.get("source_eligibility") or {}).get("kragel") is not True:
         return None
     windows = _target_windows(target)
     if not windows:

@@ -29,6 +29,7 @@ export default function BrainCanvas({
   } | null>(null);
   const [mode, setMode] = useState(cinematic ? "points" : "surface");
   const [split, setSplit] = useState(false);
+  const [colorMode, setColorMode] = useState("magnitude");
   const [range, setRange] = useState<number[] | null>(null);
   const [status, setStatus] = useState("Loading anatomical surface");
   const [time, setTime] = useState<number | null>(null);
@@ -70,11 +71,11 @@ export default function BrainCanvas({
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         host.appendChild(renderer.domElement);
         const scene = new THREE.Scene();
-        scene.add(new THREE.AmbientLight(0xffffff, 1.45));
-        const light = new THREE.DirectionalLight(0xe8f6ff, 3.0);
+        scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+        const light = new THREE.DirectionalLight(0xffffff, 1.2);
         light.position.set(130, 180, 180);
         scene.add(light);
-        const fill = new THREE.DirectionalLight(0xb5dce8, 1.25);
+        const fill = new THREE.DirectionalLight(0xffffff, 0.3);
         fill.position.set(-140, 20, -100);
         scene.add(fill);
         const group = new THREE.Group();
@@ -96,8 +97,8 @@ export default function BrainCanvas({
           geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
           const material = new THREE.MeshStandardMaterial({
             vertexColors: true,
-            roughness: 0.6,
-            metalness: 0.12,
+            roughness: 0.95,
+            metalness: 0,
             side: THREE.DoubleSide,
           });
           const mesh = new THREE.Mesh(geometry, material);
@@ -129,6 +130,7 @@ export default function BrainCanvas({
         controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = false;
         controls.enablePan = false;
+        controls.enabled = !cinematic;
         controls.minDistance = 190;
         controls.maxDistance = 480;
         const render = () => renderer?.render(scene, camera);
@@ -157,7 +159,9 @@ export default function BrainCanvas({
               const cloud = m.userData.cloud as THREE.Points;
               cloud.visible = mode === "points";
               m.position.x = split ? (i === 0 ? -22 : 22) : 0;
+              m.rotation.y = split ? (i === 0 ? -0.45 : 0.45) : 0;
               cloud.position.copy(m.position);
+              cloud.rotation.copy(m.rotation);
             });
             render();
           },
@@ -190,7 +194,7 @@ export default function BrainCanvas({
         }
         const ray = new THREE.Raycaster();
         pick = (event: PointerEvent) => {
-          if (event.button !== 0 || !renderer) return;
+          if (cinematic || event.button !== 0 || !renderer) return;
           const rect = renderer.domElement.getBoundingClientRect();
           const pointer = new THREE.Vector2(
             ((event.clientX - rect.left) / rect.width) * 2 - 1,
@@ -266,9 +270,12 @@ export default function BrainCanvas({
           Math.abs(data.range[1]),
           0.001,
         );
-        const low = new THREE.Color("#426bb2"),
-          mid = new THREE.Color("#e4eef0"),
-          high = new THREE.Color("#158e87");
+        const low = new THREE.Color("#225cbb"),
+          mid = new THREE.Color("#d8dce4"),
+          warm = new THREE.Color("#ef531d"),
+          high = new THREE.Color("#fff074"),
+          floor = new THREE.Color("#e5e7e9"),
+          red = new THREE.Color("#ef4933");
         const c = new THREE.Color();
         view.current.meshes.forEach((mesh) => {
           const colors = mesh.geometry.getAttribute(
@@ -280,14 +287,22 @@ export default function BrainCanvas({
               -1,
               Math.min(1, data.values[i + offset] / limit),
             );
-            c.copy(mid).lerp(v >= 0 ? high : low, Math.abs(v));
+            const magnitude = Math.abs(v);
+            if (colorMode === "magnitude") {
+              if (magnitude < 0.12) c.copy(floor);
+              else if (magnitude < 0.35) c.copy(floor).lerp(red, (magnitude - 0.12) / 0.23);
+              else if (magnitude < 0.65) c.copy(red).lerp(warm, (magnitude - 0.35) / 0.30);
+              else c.copy(warm).lerp(high, (magnitude - 0.65) / 0.35);
+            } else if (v < 0) c.copy(mid).lerp(low, -v);
+            else if (v < 0.5) c.copy(mid).lerp(warm, v * 2);
+            else c.copy(warm).lerp(high, (v - 0.5) * 2);
             colors.setXYZ(i, c.r, c.g, c.b);
           }
           colors.needsUpdate = true;
         });
         view.current.render();
         setTime(data.time);
-        setRange([-limit, limit]);
+        setRange([colorMode === "magnitude" ? 0 : -limit, limit]);
         setStatus("");
       } catch (error) {
         if (!controller.signal.aborted)
@@ -298,9 +313,13 @@ export default function BrainCanvas({
     };
     void paint();
     return () => controller.abort();
-  }, [evaluationId, frame, comparisonId, ready]);
+  }, [evaluationId, frame, comparisonId, ready, colorMode]);
   return (
-    <div className="brain-stage">
+    <div
+      className={
+        "brain-stage" + (cinematic ? " brain-cinematic" : " brain-interactive")
+      }
+    >
       <div className="brain-stage-top">
         <span>FSAVERAGE5 / CORTEX</span>
         <div>
@@ -363,17 +382,43 @@ export default function BrainCanvas({
             checked={split}
             onChange={(e) => setSplit(e.target.checked)}
           />
-          <span>Spread hemispheres</span>
+          <span>Open hemispheres</span>
         </label>
       </div>
+      {evaluationId && (
+        <label className="brain-palette">
+          <span>Color scale</span>
+          <select
+            aria-label="Cortical color scale"
+            value={colorMode}
+            onChange={(e) => setColorMode(e.target.value)}
+          >
+            <option value="signed">Signed response</option>
+            <option value="magnitude">Absolute magnitude</option>
+          </select>
+        </label>
+      )}
       {range && (
         <div className="brain-scale">
-          <span>Model-response units</span>
-          <i />
+          <span>
+            {colorMode === "magnitude"
+              ? "Magnitude · sign hidden"
+              : "Signed model-response units"}
+          </span>
+          <i
+            style={{
+              background:
+                colorMode === "magnitude"
+                  ? "linear-gradient(90deg,#e5e7e9 12%,#ef4933 35%,#ef531d 65%,#fff074)"
+                  : "linear-gradient(90deg,#225cbb,#d8dce4 50%,#ef531d 75%,#fff074)",
+            }}
+          />
           <div>
             <span>{range[0].toFixed(2)}</span>
+            {colorMode === "signed" && <span>0</span>}
             <span>{range[1].toFixed(2)}</span>
           </div>
+          <small>{colorMode === "magnitude" ? "Fixed recording range; neutral below 12%" : "Fixed signed recording range"}</small>
         </div>
       )}
       <div className="brain-stage-bottom">
@@ -383,7 +428,11 @@ export default function BrainCanvas({
             : `${comparisonId ? "DIFFERENCE" : "RESPONSE"} AT ${time.toFixed(1)}s`}
           {vertex !== null ? ` · VERTEX ${vertex}` : ""}
         </span>
-        <span>Drag to rotate</span>
+        <span>
+          {cinematic
+            ? "Anatomical reference"
+            : "Drag to rotate · scroll to zoom"}
+        </span>
       </div>
     </div>
   );

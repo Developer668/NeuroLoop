@@ -1,7 +1,17 @@
 """Figures use persisted numerical records only."""
 import plotly.graph_objects as go
+import math
 TEAL='#147a82'
 NAVY='#172e3d'
+CHART_GUIDANCE = {
+    'Measured change': 'Above the dotted line means the candidate scored higher than its baseline. Check the recorded keep/revert decision: a small gain may miss the acceptance threshold. This is a model-reference score, not audience preference.',
+    'Operator outcomes': 'Compare how often each controlled edit was kept, reverted or rejected. Counts describe the selected history; unequal attempts do not establish which operator is best.',
+    'Search trajectory': 'Follow candidate scores within each run. A downward step can be a rejected experiment, not a loss of the saved best creative. Different runs may use different reference objectives.',
+    'Parallel coordinates': 'Brush an axis to find interventions with similar gain or cost. Each line is an intervention; seconds and evaluation counts belong to its whole run and must not be summed across lines.',
+    'Compute efficiency': 'Inspect how recorded compute grows with evaluations, including failed runs. Interrupted runs may have incomplete accounting; this is not a benchmark or a prediction of future latency.',
+    'Run reliability': 'See the recorded completion, cancellation and failure counts. These operational outcomes include deliberate cancellations and are not a measured hardware reliability rate.',
+    'Operator experience': 'Inspect observed mean gain by context and operator. These are the policy’s past observations, not proof that it improves on unseen projects.',
+}
 def styled(fig,title,x='',y=''):
     fig.update_layout(template='plotly_white',title=title,height=390,font=dict(family='Segoe UI, sans-serif',color=NAVY),colorway=[TEAL,NAVY,'#80afb1','#998867'],margin=dict(l=55,r=25,t=65,b=65),xaxis_title=x,yaxis_title=y,hovermode='closest')
     return fig
@@ -45,9 +55,19 @@ def experiment_figures(runs,experiments,stats):
     return figures
 
 def cortical_figures(evidence):
-    times=evidence.get('times',[]); fig=go.Figure()
+    times=evidence.get('times',[])
+    values=[evidence.get('left_mean',[]),evidence.get('right_mean',[])]
+    if not times or any(len(row)!=len(times) for row in values):
+        return {}
+    try:
+        if not all(math.isfinite(float(value)) for row in [times,*values] for value in row):
+            return {}
+    except (TypeError,ValueError):
+        return {}
+    fig=go.Figure()
     for key,label,color in [('left_mean','Left',TEAL),('right_mean','Right',NAVY)]:
         fig.add_trace(go.Scatter(x=times,y=evidence.get(key,[]),mode='lines+markers',name=label,line=dict(color=color)))
     figures={'Hemisphere timeline':styled(fig,'Actual saved cortical means','Official segment start (s)','Model response units')}
-    figures['Hemisphere heatmap']=styled(go.Figure(go.Heatmap(x=times,y=['Left','Right'],z=[evidence.get('left_mean',[]),evidence.get('right_mean',[])],colorscale=[[0,NAVY],[.5,'#f4f7f7'],[1,TEAL]],zmid=0,colorbar=dict(title='Units'))),'When hemispheric means differ','Official segment start (s)','Hemisphere')
+    extent=max(max(abs(float(value)) for row in values for value in row),1e-9)
+    figures['Hemisphere heatmap']=styled(go.Figure(go.Heatmap(x=times,y=['Left','Right'],z=values,colorscale=[[0,'#2866a4'],[.5,'#f4f7f7'],[1,'#c94726']],zmin=-extent,zmax=extent,zmid=0,colorbar=dict(title='Units'),hovertemplate='%{y} hemisphere<br>Segment start %{x:.2f} s<br>Mean %{z:.4f} units<extra></extra>')),'Saved hemisphere means over time','Official segment start (s)','Hemisphere')
     return figures

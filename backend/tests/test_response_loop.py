@@ -33,6 +33,7 @@ def allow_test_readouts(monkeypatch):
     """Expose a model-free readiness fixture for controller-only tests."""
     from neuroloop import services
 
+    monkeypatch.setattr(kragel, 'registration', lambda: {'decision_eligible': True})
     monkeypatch.setattr(services, 'readout_asset_status', lambda root=None: {
         'tsam': {'ready': True, 'missing': []},
         'kragel': {'ready': True, 'missing': []},
@@ -52,7 +53,7 @@ def test_response_ensemble_preserves_sources_and_disagreement():
     evidence={
         'tsam': {'status':'experimental','labels':['Anger','Contempt','Disgust','Fear','Happiness','Neutral','Sadness','Surprise'],
                  'windows':[{'logits':[-2,-3,-3,-2,4,-2,-2,2]}]},
-        'kragel': {'status':'experimental','aggregate':{'amused':.08,'angry':-.04,'content':.05,'fearful':-.03,'neutral':-.06,'sad':-.02,'surprised':.04}},
+        'kragel': {'registration_verified':True,'transfer_validated':True,'decision_eligible':True,'status':'experimental','aggregate':{'amused':.08,'angry':-.04,'content':.05,'fearful':-.03,'neutral':-.06,'sad':-.02,'surprised':.04}},
     }
     report=ensemble(evidence)
     assert report['active_sources']==['tsam','kragel']
@@ -63,8 +64,8 @@ def test_response_ensemble_preserves_sources_and_disagreement():
 
 
 def test_response_target_score_moves_toward_declared_emotion():
-    base={'values':{'happiness':.25,'fear':.50},'mean_disagreement':.1}
-    improved={'values':{'happiness':.78,'fear':.08},'mean_disagreement':.1}
+    base={'decision_eligible':True,'values':{'happiness':.25,'fear':.50},'mean_disagreement':.1}
+    improved={'decision_eligible':True,'values':{'happiness':.78,'fear':.08},'mean_disagreement':.1}
     target={'emotions':{'happiness':{'desired':.8,'weight':1},'fear':{'desired':.05,'weight':1}}}
     assert target_score(improved,target)['value'] > target_score(base,target)['value']
 
@@ -140,7 +141,7 @@ def test_response_target_worker_keeps_improving_candidate(client,headers,monkeyp
             asset_id=selected.id,cache_key='x'+str(calls['n']),evaluator='fixture',profile='fixed-profile',
             evidence={'response_ensemble':{
                 'profile':'fixture','values':{'happiness':happiness},'sources':{},'source_weights':{},
-                'active_sources':['fixture'],'disagreement':{},'mean_disagreement':None,
+                'decision_eligible': True, 'active_sources':['fixture'],'disagreement':{},'mean_disagreement':None,
                 'confidence':'fixture','interpretation':'deterministic controller fixture',
             }},prediction_path=None,duration_seconds=0,
         )

@@ -3,16 +3,24 @@ import shutil
 import subprocess
 import time
 import psutil
+import os
 
 _cached=None
 _checked=0.0
+_cached_device=None
 
 def hardware_status():
-    global _cached,_checked
-    if _cached is not None and time.monotonic()-_checked<3:
+    global _cached,_checked,_cached_device
+    requested=os.getenv('NEUROLOOP_INFERENCE_DEVICE','auto').strip().lower()
+    if _cached is not None and requested==_cached_device and time.monotonic()-_checked<3:
         return _cached
     ram=psutil.virtual_memory()
     result={'ram_total_bytes':ram.total,'ram_available_bytes':ram.available,'gpu':None,'accelerator':None}
+    if requested == 'cpu':
+        from .execution_guard import cpu_verification_enabled
+        result.update(accelerator='cpu',execution_scope='cpu_only_verification' if cpu_verification_enabled() else 'cpu',gpu_allowed=False)
+        _cached=result;_checked=time.monotonic();_cached_device=requested
+        return result
     executable=shutil.which('nvidia-smi')
     if executable:
         try:
@@ -35,7 +43,7 @@ def hardware_status():
                                'total_mib':None,'free_mib':None,'temperature_c':None}
         except (ImportError,ModuleNotFoundError,RuntimeError):
             result['accelerator']='unknown'
-    _cached=result;_checked=time.monotonic()
+    _cached=result;_checked=time.monotonic();_cached_device=requested
     return result
 
 def require_inference_headroom():

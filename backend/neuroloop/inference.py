@@ -105,7 +105,7 @@ def _collect_profile_inputs(root: Path) -> tuple[dict[str, Path], dict[str, dict
 def _package_versions() -> dict[str, str]:
     import importlib.metadata
     packages = {}
-    for package in ['torch', 'torchvision', 'transformers', 'numpy', 'pandas', 'pillow', 'moviepy', 'neuralset', 'neuraltrain', 'bitsandbytes', 'accelerate', 'faster-whisper', 'spacy', 'en-core-web-lg']:
+    for package in ['torch', 'torchvision', 'torchaudio', 'timm', 'transformers', 'numpy', 'pandas', 'pillow', 'moviepy', 'neuralset', 'neuraltrain', 'bitsandbytes', 'accelerate', 'faster-whisper', 'spacy', 'en-core-web-lg']:
         try:
             packages[package] = importlib.metadata.version(package)
         except importlib.metadata.PackageNotFoundError:
@@ -119,6 +119,7 @@ def _runtime_platform() -> dict[str, str]:
         'machine': platform.machine(),
         'python': platform.python_version(),
         'implementation': platform.python_implementation(),
+        'requested_device': os.getenv('NEUROLOOP_INFERENCE_DEVICE', 'auto'),
     }
 
 
@@ -340,7 +341,7 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
         # This is not a remedy for a kernel/driver fault; OOM remains a reported failure.
         torch.cuda.set_per_process_memory_fraction(0.75)
         torch.cuda.reset_peak_memory_stats()
-    torch.set_num_threads(6)
+    torch.set_num_threads(max(1, min(8, int(os.getenv('NEUROLOOP_CPU_THREADS', '6')))))
     started=time.monotonic(); duration=float(details.get('duration') or config.get('presentation_seconds',8))
     words=list(config.get('transcript') or details.get('transcript') or []); transcript_source='provided timed words' if words else 'none'
     adaptation=None; original_kind=kind
@@ -386,7 +387,7 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
         on_progress('Loading frozen TRIBE and local feature encoders')
         if str(root) not in sys.path: sys.path.insert(0,str(root))
         from models.load_local_tribe import load_local_tribe
-        _model=load_local_tribe(device, features_to_use=plan.tribe_features)
+        _model=load_local_tribe(device, features_to_use=plan.tribe_features, cache_identity=finalized_profile)
         if not _snapshot_matches(finalized_snapshot, root):
             _model = None
             _model_profile = None
@@ -403,9 +404,6 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
     times=[float(x.start) for x in segments]
     atomic_json(output/'segments.json',[{'start':float(x.start),'duration':float(x.duration)} for x in segments])
     evidence=summarize(predictions,times)
-    evidence.update({'evaluator':'TRIBE v2','profile':tribe_profile,'kind':'model_predicted_cortical_response','device':device,'segment_durations':[float(x.duration) for x in segments],'source_duration':duration,'modalities':sorted(events.type.unique().tolist()),'transcript_source':transcript_source,'transcript_words':len(words),'input_adaptation':adaptation or plan.input_adaptation,'model_selection':plan.as_dict(),'seconds':time.monotonic()-started,'peak_cuda_bytes':torch.cuda.max_memory_allocated() if device == 'cuda' else None,'time_note':'Official segment timestamps retained. TRIBE handles the hemodynamic offset; no extra time shift is applied.','quantization':'Original TRIBE brain checkpoint; locally quantized INT8 video and NF4 base text encoders.','limitations':['Predicted average cortical response, not an individual brain scan.','Not purchase intent, CTR, thoughts, or a calibrated emotion probability.','Quantized end-to-end neuroscience accuracy has not been established.','Reader feeling and reader-specific brain activity are not measured by a text stimulus alone.'],'provenance':{'contract_version':'response-provenance/v1','model':{'name':'TRIBE v2','version':tribe_profile},'checkpoint':{'sha256':_digest(root/'tribev2-balanced-qv-local/best.ckpt'),'version':'best.ckpt'},'preprocessing':{'version':'TRIBE official event timeline; profile-bound','sha256':tribe_profile},'geometry':{'version':'fsaverage5-left-right-v1','sha256':geometry_hash,'files':geometry_manifest},'projection':{'version':'not_applicable/tribe-cortical-output-v1','sha256':None,'meaning':'TRIBE cortical output is not a volume projection'},'time_axis':{'version':'normalized-interval-axis/v1','source_duration':duration,'segments':[{'start':float(x.start),'duration':float(x.duration)} for x in segments]}},'emotion_decoder':{'status':'experimental' if config.get('include_kragel') else 'not_requested','reason':'Kragel pattern expression is model-to-model experimental evidence, not calibrated human emotion.'}})
-    _release_model(model,torch,device)
-    del model, events, rows, common
     evidence.update({
         'evaluator': 'TRIBE v2',
         'profile': finalized_profile,
@@ -461,8 +459,11 @@ def _evaluate_in_process(path: Path,kind: str,details: dict,config: dict,output:
     if config.get('include_kragel'):
         on_progress('Computing experimental Kragel emotion-pattern expression')
         try:
-            from .kragel import decode
-            evidence['kragel']=decode(predictions,times,[float(x.duration) for x in segments],duration)
+            from .kragel import decode_source_supported
+            # Official TRIBE windows may extend past a fractional final media
+            # second. Keep raw prediction segments above, but bound diagnostic
+            # temporal support to the actual observed stimulus interval.
+            evidence['kragel']=decode_source_supported(predictions,times,[float(x.duration) for x in segments],duration)
         except Exception as exc:
             evidence['kragel']={'status':'failed','reason':str(exc)[:500]}
     if any(value.get('status') == 'experimental' for value in (evidence.get('tsam'), evidence.get('kragel')) if isinstance(value, dict)):

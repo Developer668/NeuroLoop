@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { useInView } from "motion/react";
 import Link from "next/link";
 
@@ -12,17 +12,13 @@ const integrations = [
 export function IntegrationStrip() {
   const ref = useRef<HTMLElement>(null);
   const visible = useInView(ref);
-  const [paused, setPaused] = useState(false);
   return (
     <section ref={ref} className="integration-strip" aria-label="Tools used in NeuroLoop">
       <div className="integration-strip-heading">
         <span className="eyebrow">BUILT WITH</span>
-        <button type="button" aria-pressed={paused} onClick={() => setPaused(!paused)}>
-          {paused ? "Resume motion" : "Pause motion"}
-        </button>
       </div>
       <div className="integration-window">
-        <div className="integration-track" style={{ animationPlayState: paused || !visible ? "paused" : "running" }}>
+        <div className="integration-track" style={{ animationPlayState: !visible ? "paused" : "running" }}>
           {[0, 1].map(copy => (
             <div className="integration-group" key={copy} aria-hidden={copy === 1 ? true : undefined}>
               {integrations.map(item => (

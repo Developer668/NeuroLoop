@@ -3,6 +3,26 @@
   margin: 8px auto 60px;
   color: #173540;
 }
+
+.neuro-page { min-height: calc(100dvh - 150px); display: flex; flex-direction: column; margin-bottom: 0; }
+.neuro-thread { flex: 1; }
+.prompt-input { width: min(100%, 620px); margin: auto auto 0; border-radius: 24px; padding: 14px 16px; transition: width .35s cubic-bezier(.175,.885,.32,1.275), box-shadow .2s, border-color .2s; }
+.prompt-input[data-expanded="true"] { width: min(100%, 820px); }
+.prompt-input textarea { min-height: 34px; transition: min-height .2s; }
+.prompt-input[data-expanded="true"] textarea { min-height: 68px; }
+.prompt-input .neuro-compose-tools { margin-top: 10px; }
+.prompt-provider { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted, #61777f); }
+.prompt-input .neuro-send { border-radius: 12px; }
+.neuro-loading { display: flex; align-items: center; gap: 10px; padding: 16px 0; font-size: 13px; }
+.neuro-loading-grid { display: grid; grid-template-columns: repeat(3,4px); gap: 1.5px; }
+.neuro-loading-grid > span { width: 4px; height: 4px; background: currentColor; }
+.neuro-loading-label { background: linear-gradient(90deg,var(--muted,#61777f) 35%,var(--ink,#173540) 50%,var(--muted,#61777f) 65%); background-size: 200% 100%; background-clip: text; color: transparent; animation: shimmer-text 1.4s linear infinite; }
+.neuro-loading time { font-family: monospace; font-variant-numeric: tabular-nums; color: var(--muted,#61777f); font-size: 12px; }
+@keyframes pixel-on { 0%,100% { opacity: .12; } 50% { opacity: 1; } }
+@keyframes shimmer-text { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .neuro-loading-grid > span,.neuro-loading-label { animation: none !important; } .prompt-input,.prompt-input textarea { transition: none; } }
+[data-motion="reduced"] .neuro-loading-grid > span,[data-motion="reduced"] .neuro-loading-label { animation: none !important; }
+@media (max-width: 560px) { .neuro-page { min-height: calc(100dvh - 120px); } .prompt-provider { font-size: 10px; } }
 .neuro-page-top {
   display: flex;
   align-items: center;
@@ -26,102 +46,6 @@
   font-size: 12px;
   color: #355962;
   text-decoration: none;
-}
-.neuro-intro {
-  display: flex;
-  flex-direction: row-reverse;
-  justify-content: space-between;
-  align-items: center;
-  gap: 20px;
-  padding: 42px 0 30px;
-}
-.neuro-intro .eyebrow {
-  font-size: 10px;
-  letter-spacing: 0.12em;
-}
-.neuro-intro h1 {
-  font-size: clamp(36px, 4vw, 58px);
-  line-height: 1.08;
-  letter-spacing: -0.048em;
-  font-weight: 450;
-  margin: 19px 0;
-}
-.neuro-intro h1 em {
-  font-family: Georgia, serif;
-  color: #4e7978;
-  font-weight: 400;
-}
-.neuro-intro p {
-  font-size: 14px;
-  line-height: 1.7;
-  color: #61777f;
-}
-.neuro-artwork {
-  width: 230px;
-  height: 230px;
-  object-fit: contain;
-  flex-shrink: 0;
-  filter: drop-shadow(0 16px 17px #1b516018);
-}
-.neuro-mode {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  font-size: 11px;
-  color: #647d82;
-  margin-bottom: 20px;
-}
-.neuro-mode-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #31817d;
-}
-.neuro-command-cards {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-.neuro-command-cards button {
-  position: relative;
-  text-align: left;
-  display: flex;
-  flex-direction: column;
-  gap: 13px;
-  padding: 22px 20px;
-  background: #ffffff96;
-  border: 1px solid #d8e4e1;
-  border-radius: 14px;
-  color: #264d57;
-  cursor: pointer;
-  transition:
-    background 0.2s,
-    transform 0.2s,
-    border-color 0.2s;
-}
-.neuro-command-cards button:hover {
-  background: white;
-  border-color: #93b8b1;
-  transform: translateY(-3px);
-}
-.neuro-command-cards button:disabled {
-  opacity: 0.6;
-  cursor: wait;
-}
-.neuro-command-cards strong {
-  font-size: 13px;
-  font-weight: 550;
-}
-.neuro-command-cards span {
-  font-size: 11px;
-  line-height: 1.6;
-  color: #6f8287;
-}
-.neuro-command-cards code {
-  margin-top: 8px;
-  font-size: 10px;
-  color: #688585;
 }
 .neuro-thread {
   margin: 22px 0;
@@ -480,3 +404,19 @@
     white-space: normal;
   }
 }
+
+/* Compact command workspace; the only responses come from the local API. */
+.neuro-command-intro { display: flex; align-items: center; gap: 18px; padding: 32px 0 12px; }
+.neuro-command-intro h1 { margin: 0 0 7px; font-size: 28px; letter-spacing: -.04em; font-weight: 550; }
+.neuro-command-intro p { margin: 0; font-size: 13px; line-height: 1.65; color: #61777f; }
+.neuro-local-label { margin-left: auto; white-space: nowrap; font-size: 10px; padding: 7px 10px; border: 1px solid #cdded9; border-radius: 20px; color: #426f71; }
+.neuro-thread:has(> div:only-child) { margin: 12px 0; }
+@media (max-width: 560px) { .neuro-command-intro { flex-wrap: wrap; gap: 12px; } .neuro-command-intro > div { flex: 1; } .neuro-local-label { margin-left: 76px; } }
+
+[data-theme="dark"] .neuro-page { color: var(--ink); }
+[data-theme="dark"] .neuro-page-top, [data-theme="dark"] .neuro-exchange { border-color: var(--line); }
+[data-theme="dark"] .neuro-composer, [data-theme="dark"] .neuro-command-menu { background: var(--surface); border-color: var(--line); }
+[data-theme="dark"] .neuro-composer textarea, [data-theme="dark"] .neuro-command-menu button { color: var(--ink); }
+[data-theme="dark"] .neuro-question, [data-theme="dark"] .neuro-command-toggle, [data-theme="dark"] .neuro-command-menu button:hover { background: var(--surface-2); color: var(--ink); }
+[data-theme="dark"] .neuro-command-intro p, [data-theme="dark"] .neuro-footnote, [data-theme="dark"] .neuro-draft-state, [data-theme="dark"] .neuro-answer small { color: var(--muted); }
+[data-theme="dark"] .neuro-page-top a, [data-theme="dark"] .neuro-result-links a, [data-theme="dark"] .neuro-footnote a, [data-theme="dark"] .neuro-local-label { color: #9bdfd4; border-color: var(--line); }

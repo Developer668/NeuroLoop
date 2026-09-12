@@ -2,10 +2,16 @@
 
 This document describes the implementation inspected during the September 10,
 2026 operational audit. The system lives in `D:\NeuroLoop` and runs on one laptop.
-See [AUDIT.md](AUDIT.md) for measured results and [REMAINING-WORK.md](REMAINING-WORK.md)
+See [FRESH-EXECUTION.md](FRESH-EXECUTION.md) for the September 11 follow-up results, [AUDIT.md](AUDIT.md) for historical measurements and [REMAINING-WORK.md](REMAINING-WORK.md)
 for gaps. Implemented does not mean scientifically validated or ready for public deployment.
 
 **Recovery state:** GPU work and Launch are currently held by `data/inference-quarantine.json` after the 21:47 Pacific graphics crash. The flow below describes implemented execution; only review/API/research services run while the hold exists.
+
+An explicit `scripts/verify_cpu_run.py` process can now verify one newly queued CPU run while preserving that GPU hold. It initializes a fresh stdio MCP client, queues through the same service, acquires the shared worker lock, executes under the existing supervisor and validates saved arrays/manifests. CUDA is hidden before imports; duration, threads and memory are bounded. It does not start the general worker or Launch agent.
+
+The video encoder preserves Neuralset's twenty selected layers and two downstream group means (2,816 features). Token pooling occurs before host transfer; exact static decoded frames may reuse one frozen-model feature result. Feature cache namespaces bind the complete checked evaluator profile and resolved device. Exca worker-liveness checks use read-only process lookup on Windows.
+
+Kragel scoring is a diagnostic branch unless registration and transfer eligibility are explicitly established. Diagnostic intervals intersect original TRIBE windows with actual source support; padded windows outside the media are excluded, while raw cortical predictions remain unchanged. Scientific eligibility is independent of technical execution success.
 
 ## What the product actually does
 

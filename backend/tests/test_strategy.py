@@ -8,7 +8,10 @@ from neuroloop.strategy import CreativeStrategist, InterventionProposal
 @pytest.fixture(autouse=True)
 def allow_model_free_optional_readouts(monkeypatch):
     """Controller tests use deterministic fixtures instead of optional models."""
-    from neuroloop import services
+    from neuroloop import services, kragel
+
+    # Explicit controller fixture, not a claim about the actual registration.
+    monkeypatch.setattr(kragel, "registration", lambda: {"decision_eligible": True})
 
     monkeypatch.setattr(services, 'readout_asset_status', lambda root=None: {
         'tsam': {'ready': True, 'missing': []},
@@ -122,7 +125,7 @@ def test_worker_evaluates_three_siblings_and_retains_the_winner(client, headers,
                     "values": {"happiness": score},
                     "sources": {},
                     "source_weights": {},
-                    "active_sources": ["fixture"],
+                    "decision_eligible": True, "active_sources": ["fixture"],
                     "disagreement": {},
                     "mean_disagreement": None,
                     "confidence": "fixture",
@@ -195,7 +198,7 @@ def test_worker_preserves_previous_best_when_all_siblings_fail(client, headers, 
                     "values": {"happiness": 0.2},
                     "sources": {},
                     "source_weights": {},
-                    "active_sources": ["fixture"],
+                    "decision_eligible": True, "active_sources": ["fixture"],
                     "disagreement": {},
                     "mean_disagreement": None,
                     "confidence": "fixture",
@@ -253,7 +256,7 @@ def test_worker_rejects_failed_pre_evaluation_gate_before_model_evaluation(clien
         if calls["evaluation"] > 1:
             raise AssertionError("candidate reached the model evaluator")
         from neuroloop.db import Evaluation
-        return Evaluation(id="gate-baseline", asset_id=selected.id, cache_key="gate-baseline-cache", evaluator="fixture", profile="fixed-profile", evidence={"response_ensemble": {"profile": "fixture", "values": {"happiness": 0.2}, "sources": {}, "source_weights": {}, "active_sources": ["fixture"], "disagreement": {}, "mean_disagreement": None, "confidence": "fixture", "interpretation": "control-flow fixture"}}, prediction_path=None, duration_seconds=0)
+        return Evaluation(id="gate-baseline", asset_id=selected.id, cache_key="gate-baseline-cache", evaluator="fixture", profile="fixed-profile", evidence={"response_ensemble": {"profile": "fixture", "values": {"happiness": 0.2}, "sources": {}, "source_weights": {}, "decision_eligible": True, "active_sources": ["fixture"], "disagreement": {}, "mean_disagreement": None, "confidence": "fixture", "interpretation": "control-flow fixture"}}, prediction_path=None, duration_seconds=0)
 
     def reject_gate(*args, **kwargs):
         calls["gate"] += 1
