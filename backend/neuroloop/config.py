@@ -1,5 +1,6 @@
 """Explicit configuration; secrets never enter browser bundles or evidence records."""
 import os
+import sys
 from pathlib import Path
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -30,7 +31,7 @@ class Settings(BaseSettings):
     port: int = 8010
     frontend_origin: str = 'http://localhost:3010'
     model_python: Path = _default_model_python()
-    model_timeout_seconds: int = 900
+    model_timeout_seconds: int = 2400 if sys.platform == 'darwin' else 900
     allow_model_downloads: bool = False
     tsam_enabled: bool = False
     tsam_research_license_accepted: bool = False

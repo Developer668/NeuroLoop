@@ -1,0 +1,11 @@
+:root { --accent-9: #147a82; --accent-10: #153d50; --background: #f6f8fa; --foreground: #172e3d; }
+html,body { background: #f6f8fa !important; color: #172e3d; font-family: "Segoe UI",Arial,sans-serif !important; }
+.markdown, .markdown p, .markdown li, .prose { font-family: "Segoe UI",Arial,sans-serif !important; font-size: 14px; line-height: 1.8; color: #536c7b; }
+h1,h2,h3,.markdown h1,.markdown h2,.markdown h3 { font-family: "Segoe UI",Arial,sans-serif !important; color: #172e3d; font-weight: 600 !important; letter-spacing: -.8px; }
+h1,.markdown h1 { font-size: 42px !important; }
+h2,.markdown h2 { font-size: 24px !important; }
+a { color: #147a82 !important; }
+button,select,input { font-family: "Segoe UI",Arial,sans-serif !important; }
+select { min-height: 36px; border-radius: 7px; border: 1px solid #cfdee5; background: white; padding: 6px 12px; }
+.output-area { padding: 16px 0; }
+marimo-table { background: white; border-radius: 12px; }
