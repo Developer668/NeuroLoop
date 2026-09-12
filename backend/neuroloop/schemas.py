@@ -22,9 +22,27 @@ class TimedWord(StrictModel):
             raise ValueError('Word end must follow start')
         return self
 
+EmotionName = Literal['happiness','surprise','fear','sadness','anger','neutral','contempt','disgust']
+
+class EmotionTarget(StrictModel):
+    desired: float = Field(ge=0, le=1)
+    weight: float = Field(default=1.0, gt=0, le=5)
+
+class ResponseTarget(StrictModel):
+    goal: str = Field(default='', max_length=1000)
+    emotions: dict[EmotionName, EmotionTarget] = Field(default_factory=dict)
+
+    @model_validator(mode='after')
+    def nonempty(self):
+        if not self.emotions:
+            raise ValueError('At least one emotion target is required')
+        return self
+
 class RunCreate(StrictModel):
     project_id: str
     mode: Literal['analyze', 'compare', 'optimize'] = 'analyze'
+    objective: Literal['reference_similarity','response_target'] = 'reference_similarity'
+    target: ResponseTarget | None = None
     max_evaluations: int = Field(default=4, ge=1, le=12)
     max_seconds: int = Field(default=1800, ge=30, le=7200)
     min_gain: float = Field(default=0.005, ge=0.0001, le=0.25)
@@ -37,11 +55,18 @@ class RunCreate(StrictModel):
     hypothesis: str = Field(default='', max_length=1000)
     include_tsam: bool = False
     tsam_research_acknowledged: bool = False
+    include_kragel: bool = False
 
     @model_validator(mode='after')
-    def research_readout(self):
+    def response_contract(self):
         if self.include_tsam and not self.tsam_research_acknowledged:
             raise ValueError('Acknowledge the TSAM research-use terms before requesting the experimental readout')
+        if self.objective == 'response_target' and self.target is None:
+            raise ValueError('A response-target objective requires a target')
+        if self.target is not None and self.objective != 'response_target':
+            raise ValueError('A response target requires objective=response_target')
+        if self.objective == 'response_target' and not (self.include_tsam or self.include_kragel):
+            raise ValueError('Response-target optimization requires TSAM, Kragel, or both')
         return self
 
 class CreativeCreate(StrictModel):

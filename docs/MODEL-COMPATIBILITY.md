@@ -22,7 +22,7 @@ The checkpoint has eight outputs. The original source's class order is **Anger, 
 
 Inference follows the repository's default configuration: 12 RGB segments, one three-channel mel-spectrogram segment, complete five-second windows, 10 FPS extraction, 256-pixel resize and 224-pixel center crop. Source audio rate is retained. The training configuration is not embedded in the checkpoint, so this verifies strict technical compatibility with the published default inference setup, not recovery of an undocumented training configuration or accuracy on advertisements.
 
-TSAM runs on CPU and reads the original audiovisual stimulus independently of TRIBE. It is opt-in through the run form with an explicit research-use acknowledgement. The UI preserves signed logits and window boundaries, labels them uncalibrated, and excludes them from automatic keep/revert scoring. Incomplete tails and inapplicable inputs are explicitly reported. A failed secondary readout does not invent replacement values.
+TSAM runs on CPU and reads the original audiovisual stimulus independently of TRIBE. It is opt-in through the run form with an explicit research-use acknowledgement. The UI preserves signed logits and window boundaries and labels them uncalibrated. In response-target mode, TSAM can contribute only through the explicit versioned ensemble while its raw output remains separate. Incomplete tails and inapplicable inputs are explicitly reported. A failed secondary readout does not invent replacement values.
 
 Checkpoint SHA-256: `f3a5e228ef12e9b9bf19116928392e8ed486f2d1908fea5c93e9452c62841569`.
 
@@ -36,12 +36,20 @@ The Destrieux atlas fetched through Nilearn is explicitly provided on fsaverage5
 
 Source: [Nilearn's surface Destrieux atlas documentation](https://nilearn.github.io/stable/modules/generated/nilearn.datasets.fetch_atlas_surf_destrieux.html). Reproduce with `scripts/prepare_atlas.py`. The installed atlas is `data/geometry/atlas.json`; source annotation files are under `models/brain_readouts/anatomy`.
 
-## Kragel: still blocked, not approximated
+## Kragel: experimental TRIBE decoder active
 
-The seven downloaded maps contain 32,492 scalar entries per hemisphere. Their GIFTI arrays do not supply the registration spheres or matching geometry needed to establish correspondence with TRIBE's fsaverage5 output. A matching count is not proof of a coordinate system. The files named `mesh` contain scalar data, not the required registration mesh.
+The seven published Kragel BPLS emotion signatures are now wired as an experimental
+TRIBE-derived readout. NeuroLoop still does **not** resize or index-interpolate the
+32,492-value surface scalar files onto TRIBE. Instead it uses the published MNI volume
+maps and samples them through Nilearn's documented fsaverage5 white-to-pial cortical
+ribbon, producing one 20,484-value signature in the same left/right vertex order used
+by TRIBE. Local checks cover about 96.9% of the target cortical vertices for every
+signature. Source map hashes and the transform profile are persisted in evidence.
 
-CANlab identifies the volumetric patterns as bootstrap-z maps and names the IXI555/MNI152 template in the surface filenames. An arbitrary resize, index interpolation, nearest-neighbor guess or normalization into percentages would not establish a valid decoder. A volume projection would require the correct documented template-to-surface registration; validation of measured-fMRI to synthetic-TRIBE transfer would still be separate work.
-
-The application consequently emits no Kragel emotion scores. Resolving this requires the source registration/transform and a documented scoring protocol, followed by transfer validation. Destrieux anatomical readout does not substitute for that scientific work.
+Each TRIBE time point is spatially centered, L2-normalized and compared with each
+normalized Kragel signature. The resulting trajectories and aggregates are pattern
+expression correlations, not emotion probabilities. The transfer from measured fMRI
+signatures to TRIBE synthetic predictions remains scientifically unvalidated, so the
+UI labels this source experimental and keeps it distinct from direct-media TSAM output.
 
 Source: [CANlab's pattern description](https://github.com/canlab/Neuroimaging_Pattern_Masks/blob/master/Multivariate_signature_patterns/2015_Kragel_emotionClassificationBPLS/contents_description.md). Local inspection: `models/brain_readouts/kragel2015/compatibility.json`.

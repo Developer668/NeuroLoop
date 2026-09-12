@@ -1,8 +1,8 @@
 """Strict, CPU-only adapter for the original TSAM inference implementation.
 
 The public checkpoint is a composite eight-class network, not a plain backbone.
-No missing layer is tolerated. Scores are uncalibrated class logits, separate
-from TRIBE and excluded from the optimization objective.
+No missing layer is tolerated. Scores are uncalibrated class logits and remain
+separate from TRIBE. Response-target runs may combine them only through the explicit, versioned ensemble.
 """
 from __future__ import annotations
 import contextlib
@@ -12,12 +12,28 @@ import json
 import sys
 import time
 from pathlib import Path
+from functools import lru_cache
 
 from .config import settings
 from .media import execute
 
 LABELS = ['Anger', 'Contempt', 'Disgust', 'Fear', 'Happiness', 'Neutral', 'Sadness', 'Surprise']
 SOURCE_REVISION = '890540450e9459b9f917b2c50204b5be6fe72433'
+
+
+@lru_cache(maxsize=1)
+def fingerprint() -> str:
+    """Content identity for the adapter and the exact checkpoint used by inference."""
+    root = settings().root / 'models/emotion/tsam'
+    h = hashlib.sha256()
+    h.update(Path(__file__).read_bytes())
+    h.update(SOURCE_REVISION.encode())
+    for name in ('tsam_weights.tar',):
+        path = root / 'weights' / name
+        if path.is_file():
+            h.update(name.encode())
+            h.update(path.read_bytes())
+    return 'tsam-8class-cpu-v1-' + h.hexdigest()[:16]
 
 
 def load_model():
@@ -102,10 +118,11 @@ def predict_video(path: Path, duration: float, output: Path) -> dict:
             'seconds': time.monotonic() - started, 'device': 'cpu',
             'weights_sha256': hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
             'source_revision': SOURCE_REVISION, 'profile': 'upstream-default-12RGB-1audio-5s-cpu-v1',
+            'fingerprint': fingerprint(),
             'class_order_source': 'Original setup_data.py and mvlib/mvideo_lib.py; includes Neutral.',
             'input': 'Independent audiovisual stimulus; no TRIBE response is fed into TSAM.',
             'omitted_tail_seconds': duration - windows[-1]['end'],
             'interpretation': 'Uncalibrated eight-class logits. Not probabilities or observed viewer emotions.',
             'limitations': ['Upstream default inference configuration; original training configuration is not embedded in the checkpoint.',
                             'Strict loading verifies architecture compatibility, not predictive validity on your creative.',
-                            'Research-use licensing applies. Excluded from automatic keep/revert decisions.']}
+                            'Research-use licensing applies. When explicitly selected for response-target optimization, the versioned ensemble may use this relative evidence for keep/revert decisions.']}

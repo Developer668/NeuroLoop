@@ -6,7 +6,8 @@
     "dev": "next dev --hostname 127.0.0.1 --port 3010",
     "build": "next build",
     "start": "node scripts/start-server.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verify:browser": "node verify-browser.cjs"
   },
   "dependencies": {
     "lucide-react": "^0.577.0",

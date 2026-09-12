@@ -70,7 +70,7 @@ def main():
             results['tsam'][name] = {'format': 'pytorch checkpoint', 'keys': list(ckpt),
                                     'status': 'weights_only load passed with explicit NumPy scalar/dtype allowlist',
                                     'head_shapes': head_shapes,
-                                    'integration_status': 'Not integrated: both files contain composite TSAM state with an 8-output head; HF card describes 7 classes and a plain backbone.'}
+                                    'integration_status': 'Integrated experimentally through backend/neuroloop/tsam.py with strict eight-class checkpoint loading; scientific/domain validation remains separate.'}
             del ckpt
     patterns = []
     for emotion in ['amused', 'angry', 'content', 'fearful', 'neutral', 'sad', 'surprised']:
@@ -82,9 +82,17 @@ def main():
             assert all(np.isfinite(a).all() for a in arrays)
             entry['hemispheres'][hemi] = {'shapes': [list(a.shape) for a in arrays], 'intents': [int(a.intent) for a in gifti.darrays]}
         patterns.append(entry)
-    results['kragel2015'] = {'directly_compatible': False, 'tribe_vertices_per_hemisphere': 10242,
-                           'source_vertices_per_hemisphere': 32492, 'patterns': patterns,
-                           'reason': 'Vertex counts differ; supplied mesh-named files contain scalar arrays, not coordinates/triangles. Surface registration and readout validation remain unresolved.'}
+    results['kragel2015'] = {
+        'direct_surface_index_compatible': False,
+        'bridge_status': 'experimental_mni_volume_to_fsaverage5_ribbon',
+        'tribe_vertices_per_hemisphere': 10242,
+        'source_vertices_per_hemisphere': 32492,
+        'patterns': patterns,
+        'reason': ('The published 32,492-vertex surface arrays are not directly index-compatible with '
+                   'TRIBE fsaverage5. NeuroLoop therefore uses the paired published MNI volumes and '
+                   'samples them through fsaverage5 white-to-pial geometry; scientific transfer '
+                   'validation remains separate.'),
+    }
     (ROOT / 'verification.json').write_text(json.dumps(results, indent=2))
     (ROOT / 'brain_readouts/kragel2015/compatibility.json').write_text(json.dumps(results['kragel2015'], indent=2))
     print('Wrote verification.json', flush=True)

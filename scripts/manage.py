@@ -62,10 +62,25 @@ def endpoint_ready(url: str) -> bool:
 
 
 def stop_children(children: dict) -> None:
+    deadline = time.monotonic() + 12
+    if os.name != 'nt':
+        import psutil
+        # Terminate descendants before their service parent is re-parented.
+        for process in children.values():
+            if process.poll() is not None:
+                continue
+            try:
+                descendants = psutil.Process(process.pid).children(recursive=True)
+            except psutil.NoSuchProcess:
+                descendants = []
+            for child in reversed(descendants):
+                try:
+                    child.terminate()
+                except psutil.NoSuchProcess:
+                    pass
     for process in children.values():
         if process.poll() is None:
             process.terminate()
-    deadline = time.monotonic() + 12
     for process in children.values():
         try:
             process.wait(timeout=max(0.1, deadline - time.monotonic()))

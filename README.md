@@ -2,7 +2,7 @@
 
 A local creative research workspace with real TRIBE v2 predictions, controlled media edits, cortical visualization and an auditable experiment ledger. The website and MCP clients use the same services, data and execution rules.
 
-**September 10, 2026 recovery status: the application is available for evidence review; GPU inference and Launch execution are paused after another Windows graphics crash. Production release is not cleared.** The crash cause has not been diagnosed. Reopening the app does not restart the failed workload.
+**September 11, 2026 engineering status: the review/API/browser/MCP stack passes its local checks. The persistent Windows crash quarantine remains preserved and Windows model execution stays blocked. On Apple Silicon, `Start-NeuroLoop.sh` explicitly enables the guarded MPS test path with a 1.5 GiB free-memory reserve. Fresh uncached end-to-end TRIBE inference with the new memory-first V-JEPA2 path is the remaining runtime gate and has not yet been claimed as passed.** Scientific validation is separate.
 
 ## Open the application
 
@@ -38,9 +38,9 @@ The isolated runtime completed a new MCP-driven silent NASA composition evaluati
 
 [Open the completed isolated-runtime result](http://localhost:3010/workspace?view=brain&evaluation=cdfaacce-e365-4eca-8447-ba323c64d5e5).
 
-The post-crash audit checked **29 saved arrays and 32 managed media files**: all array summaries, served first frames and asset hashes matched. **109 backend tests passed**, the frontend production build passed, and the recovery audit passed all 16 checks without neural execution. See [AUDIT.md](docs/AUDIT.md) for evidence and limitations.
+The post-crash audit checked **29 saved arrays and 32 managed media files**: all array summaries, served first frames and asset hashes matched. **119 runnable backend tests passed** (1 platform/runtime test skipped), the frontend production build and browser smoke suite passed, and both MCP transports expose the same 19 tools. The final fresh uncached neural loop remains intentionally unpassed until the next dedicated low-background-process Mac run. See [AUDIT.md](docs/AUDIT.md) for evidence and limitations.
 
-Scores measure similarity between predicted cortical patterns. They do not establish emotion, liking, conversion or a particular person's response. Model weights remain frozen; only context-specific edit statistics adapt. Kragel and TSAM scientific validation are deferred to the user. Commercial permissions and quantization accuracy validation remain open.
+NeuroLoop now supports both predicted-cortical reference similarity and an experimental response-target loop. Response-target runs keep TSAM direct-media logits and TRIBE-derived Kragel pattern expression separate, combine them through an explicit versioned ensemble, and optimize controlled local interventions against a declared target. These are relative model-evidence scores, not measured emotions, liking, conversion, or a particular person's response. Model weights remain frozen; only context-specific intervention statistics adapt. Scientific transfer validation and quantization accuracy remain open.
 
 ## Folder map
 
@@ -88,7 +88,7 @@ This repository contains application source, model download/quantization scripts
 
 The local model bundle from the companion NeuroLoop 2 folder has been restored into the paths used by this checkout. Run `python scripts/verify_local_assets.py` to verify it without starting inference. The large licensed weights remain ignored by Git, so they survive pulls and do not create merge conflicts; a fresh clone still needs the asset bundle or the pinned download scripts. See [the partner setup guide](PARTNER-START-HERE.md) and [local asset handoff](docs/LOCAL-ASSETS.md) for the exact boundary.
 
-A fresh clone is not a ready-to-run installation. Restore or obtain the permitted model assets, provision the pinned runtimes using [runtime documentation](docs/RUNTIME-PATCHES.md), configure private local settings and follow [connection setup](docs/CONNECTIONS.md). The existing laptop remains under the [execution hold](docs/CRASH-RECOVERY.md); publishing source does not clear that hold or any release gate.
+A fresh clone is not a ready-to-run installation. Restore or obtain the permitted model assets, provision the pinned runtimes using [runtime documentation](docs/RUNTIME-PATCHES.md), configure private local settings and follow [connection setup](docs/CONNECTIONS.md). The original Windows crash quarantine remains preserved in [crash recovery](docs/CRASH-RECOVERY.md). On macOS, local MPS inference may run only through the explicit guarded override in `Start-NeuroLoop.sh`; memory/headroom checks still fail closed.
 
 ## Verify without running a model
 
@@ -99,4 +99,4 @@ Set-Location D:\NeuroLoop
 .\.runtimes\app\Scripts\python.exe scripts/verify_wandb_mcp.py
 ```
 
-The recovery check expects the current execution hold and running review services. It validates MCP, authentication and existing outputs. **Do not run `audit_system.py` or GPU verification scripts during this hold:** those are fresh-inference workflows. For frontend changes, stop owned services, run `npm.cmd run build` in `frontend`, then restart.
+The recovery check validates the preserved Windows crash/quarantine state and existing outputs. `audit_system.py` is the active cross-platform release audit and performs fresh inference, so run it only when local model execution is intentionally enabled and hardware headroom is sufficient. For frontend changes, stop owned services, build `frontend`, then restart.

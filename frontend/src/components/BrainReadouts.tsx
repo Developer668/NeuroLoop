@@ -213,3 +213,84 @@ export function TSAMReadout({
     </Panel>
   );
 }
+
+export function KragelReadout({ evidence }: { evidence: Evaluation["evidence"] }) {
+  const value = evidence.kragel;
+  const [selected, setSelected] = useState("");
+  useEffect(() => {
+    if (value?.labels?.length && !selected) setSelected(value.labels[0]);
+  }, [value?.labels, selected]);
+  if (!value) {
+    return (
+      <Panel title="Kragel · TRIBE-derived emotion patterns">
+        <div className="panel-body">
+          <Badge value="not_requested" />
+          <p className="status-detail section-space">
+            Enable the experimental Kragel readout to compare TRIBE cortical predictions with the seven published Kragel 2015 emotion signatures.
+          </p>
+        </div>
+      </Panel>
+    );
+  }
+  if (value.status !== "experimental") {
+    return (
+      <Panel title="Kragel · TRIBE-derived emotion patterns" action={<Badge value={value.status} />}>
+        <div className="panel-body"><p className="status-detail">{value.reason || "Kragel readout unavailable."}</p></div>
+      </Panel>
+    );
+  }
+  const labels = value.labels || [];
+  const active = selected || labels[0] || "";
+  const trajectory = value.trajectories?.[active] || [];
+  const aggregate = value.aggregate || {};
+  return (
+    <Panel title="Kragel · TRIBE-derived emotion patterns" action={<Badge value="experimental" />}>
+      <div className="panel-body">
+        <div className="response-evidence-grid">
+          {labels.map((label) => (
+            <button key={label} className={"response-evidence-card " + (active === label ? "active" : "")} onClick={() => setSelected(label)}>
+              <span>{label}</span>
+              <strong>{aggregate[label]?.toFixed(4) ?? "—"}</strong>
+            </button>
+          ))}
+        </div>
+        {active && trajectory.length > 0 && (
+          <LineChart
+            series={[{ name: active, values: trajectory }]}
+            labels={(value.times || []).map((t) => `${t.toFixed(1)}s`)}
+            caption={`${active} Kragel pattern expression over TRIBE response time`}
+          />
+        )}
+        <p className="status-detail section-space">{value.interpretation}</p>
+        <small>Top pattern: {value.top_pattern || "—"}. Correlations are experimental model-to-model evidence, not probabilities or observed emotions.</small>
+      </div>
+    </Panel>
+  );
+}
+
+export function ResponseEnsembleReadout({ evidence }: { evidence: Evaluation["evidence"] }) {
+  const value = evidence.response_ensemble;
+  if (!value) return null;
+  const rows = Object.entries(value.values).filter(([, score]) => typeof score === "number") as [string, number][];
+  return (
+    <Panel title="Combined response evidence" action={<Badge value={value.confidence + " confidence"} />}>
+      <div className="panel-body">
+        <div className="response-evidence-grid">
+          {rows.map(([name, score]) => (
+            <div className="response-evidence-card" key={name}>
+              <span>{name}</span>
+              <strong>{score.toFixed(3)}</strong>
+            </div>
+          ))}
+        </div>
+        <dl className="metrics-list section-space">
+          <div><dt>Sources</dt><dd>{value.active_sources.join(" + ") || "none"}</dd></div>
+          <div><dt>TSAM weight</dt><dd>{(value.source_weights.tsam || 0).toFixed(2)}</dd></div>
+          <div><dt>Kragel weight</dt><dd>{(value.source_weights.kragel || 0).toFixed(2)}</dd></div>
+          <div><dt>Mean disagreement</dt><dd>{value.mean_disagreement == null ? "—" : value.mean_disagreement.toFixed(3)}</dd></div>
+        </dl>
+        <p className="status-detail">{value.interpretation}</p>
+      </div>
+    </Panel>
+  );
+}

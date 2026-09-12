@@ -5,6 +5,10 @@ bitsandbytes==0.50.2
 accelerate==1.13.0
 faster-whisper==1.2.1
 opencv-python-headless
+
+# Independent TSAM audiovisual emotion readout
+timm>=1.0,<2
+torchaudio>=2.11,<2.12
 scipy
 
 ./infrastructure/vendor/moviepy

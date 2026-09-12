@@ -18,18 +18,24 @@ def capabilities() -> dict:
         latest=db.scalar(select(Evaluation).order_by(Evaluation.created_at.desc()).limit(1))
         verification={'evaluation_id':latest.id,'profile':latest.profile,'created_at':latest.created_at} if latest else None
     from .execution_guard import execution_status
+    from .kragel import status as kragel_status
+    from .generation import statuses as generation_statuses
     return {'product':'NeuroLoop','version':'0.1.0','execution':execution_status(),'deployment':'single-workspace authenticated local service','training':False,'models':[{'name':name,'status':'downloaded' if path.is_file() else 'missing'} for name,path in assets],
       'tribe':{'status':'weights_present' if all(p.is_file() for _,p in assets) else 'missing_weights','last_technical_test':verification,'meaning':'Predicted average-subject cortical response; not thoughts or purchase intent.'},
-      'tsam':{'status':'experimental_weights_present' if (root/'models/emotion/tsam/weights/tsam_weights.tar').is_file() else 'missing_weights','reason':'Weight presence is checked now; loading is checked during an explicitly requested CPU evaluation. Experimental uncalibrated logits; excluded from optimization scoring.'},
-      'kragel':{'status':'blocked','reason':'32,492 versus 10,242 vertices per hemisphere. Spatial registration and synthetic-signal interpretation have not been validated.'},
+      'tsam':{'status':'experimental_weights_present' if (root/'models/emotion/tsam/weights/tsam_weights.tar').is_file() else 'missing_weights','reason':'Independent CPU audiovisual readout. The staged macOS model runtime now includes its pinned dependencies; each requested evaluation still fails closed if strict checkpoint loading or preprocessing fails. Outputs are uncalibrated relative evidence.'},
+      'kragel':kragel_status(),
+      'generation_providers':generation_statuses(),
       'modalities':{'video':'neural analysis and bounded controlled edits','image':'explicit experimental repeated-frame presentation','audio':'audio response; local speech transcription or supplied timed words','text':'requires explicit timed-word transcript'},
       'asr':{'status':'available' if (root/'models/preprocessing/faster-whisper-small/model.bin').exists() else 'not_installed','purpose':'Speech preprocessing only; not another content judge.'},
       'integrations':[
         {'name':'Weights & Biases Weave','status':'configured' if s.weave_enabled and bool(os.getenv('WANDB_API_KEY')) else 'not_configured','purpose':'Experiment trace and metric provenance'},
         {'name':'W&B Inference','status':'configured' if s.planner_enabled and bool(os.getenv('WANDB_API_KEY')) else 'not_configured','purpose':'Optional structured experiment planner'},
         {'name':'ARIA / W&B Launch','status':'check_live_connection','purpose':'Versioned, locally approved jobs; check the live agent and inspect each result receipt'},
-        {'name':'CoreWeave','status':'local_gpu','purpose':'Laptop compute only; no tested cloud deployment'},
+        {'name':'CoreWeave ARIA','status':'reviewed_optional','purpose':'Reviewed real experiment history; cloud access is optional for local inference'},
+        {'name':'CoreWeave','status':'awaiting_sponsor_credits','purpose':'Cloud compute for future generation/inference; no cloud resource is claimed as configured'},
         {'name':'marimo','status':'check_live_connection','purpose':'Read-only recorded evidence. Check service connections for the current HTTP response'},
+        {'name':'W&B Models','status':'research_metadata','purpose':'Stores experiment metadata used by research/Launch workflows'},
+        {'name':'W&B MCP','status':'credential_required_per_partner','purpose':'Official read-only inspection of W&B records'},
         {'name':'TypeSafe','status':'disabled','purpose':'Future DecisionProvider interface only'}],
       'limits':{'upload_bytes':s.max_upload_bytes,'media_seconds':s.max_media_seconds,'max_evaluations_per_run':12},
       'claim_boundaries':['No measured human subjects','No CTR or purchase probability','No psychological decoder validated on these synthetic predictions','No model-weight training'],
@@ -88,8 +94,10 @@ def create_run(body: RunCreate,key: str | None=None,expected_project:dict|None=N
             raise DomainError('Enable experimental static-image presentation to analyze images with TRIBE')
         if original.kind=='text' and not (body.transcript or original.details.get('transcript')):
             raise DomainError('Text requires a timed-word transcript; no external TTS is called automatically')
-        if body.mode in {'compare','optimize'} and not project.reference_ids:
-            raise DomainError('Choose at least one reference for this objective')
+        if body.mode=='compare' and not project.reference_ids:
+            raise DomainError('Choose at least one reference for comparison')
+        if body.mode=='optimize' and body.objective=='reference_similarity' and not project.reference_ids:
+            raise DomainError('Choose at least one reference for the reference-similarity objective')
         if body.mode=='optimize' and original.kind not in {'video','image'}:
             raise DomainError('Controlled optimization currently requires visual content')
         if len(set(project.reference_ids)) != len(project.reference_ids):
@@ -110,10 +118,11 @@ def create_run(body: RunCreate,key: str | None=None,expected_project:dict|None=N
         for field in ['preserve_duration','preserve_audio']:
             if field in project.constraints and not isinstance(project.constraints[field],bool):
                 raise DomainError(field+' must be boolean')
-        required=1+len(project.reference_ids)
+        active_refs=project.reference_ids if body.objective=='reference_similarity' or body.mode=='compare' else []
+        required=1+len(active_refs)
         if body.max_evaluations<required:
             raise DomainError(f'The baseline and references require a budget of at least {required} evaluations')
-        for ref_id in project.reference_ids:
+        for ref_id in active_refs:
             ref=db.get(Asset,ref_id)
             if not ref: raise DomainError('Reference asset no longer exists')
             if ref.sha256==original.sha256: raise DomainError('A reference cannot be a duplicate of the original')
@@ -122,13 +131,14 @@ def create_run(body: RunCreate,key: str | None=None,expected_project:dict|None=N
             if ref.kind=='text':
                 raise DomainError('Cross-document timed-text comparison needs per-document timing; analyze documents individually first')
         asr_ready=(settings().root/'models/preprocessing/faster-whisper-small/model.bin').is_file()
-        for media_id in [original.id]+project.reference_ids:
+        for media_id in [original.id]+active_refs:
             selected=db.get(Asset,media_id)
             words=(body.transcript or selected.details.get('transcript',[])) if media_id==original.id else selected.details.get('transcript',[])
             if selected.details.get('has_audio') and not body.no_speech and not words and not asr_ready:
                 raise DomainError('Speech preprocessing is unavailable. Supply timed words for each spoken asset, or explicitly confirm all inputs contain no speech.')
-        snapshots={media_id:dict(db.get(Asset,media_id).details) for media_id in [original.id]+project.reference_ids}
-        config={'request':body.model_dump(),'project_snapshot':as_dict(project),'asset_metadata_snapshots':snapshots,'objective':'spatially-centered-cosine/eight-normalized-time-bins/v1'}
+        snapshots={media_id:dict(db.get(Asset,media_id).details) for media_id in [original.id]+active_refs}
+        objective='response-target-distance/v1' if body.objective=='response_target' else 'spatially-centered-cosine/eight-normalized-time-bins/v1'
+        config={'request':body.model_dump(),'project_snapshot':as_dict(project),'asset_metadata_snapshots':snapshots,'objective':objective}
         run=Run(project_id=project.id,mode=body.mode,max_evaluations=body.max_evaluations,config=config,idempotency_key=key)
         db.add(run); db.flush(); db.add(RunEvent(run_id=run.id,kind='queued',message='Run queued with a fixed objective and evaluation budget.',details={'budget':body.max_evaluations}))
         return as_dict(run)

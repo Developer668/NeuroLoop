@@ -66,9 +66,36 @@ export type Evaluation = {
       seconds?: number;
       interpretation?: string;
     };
+    kragel?: {
+      status: string;
+      reason?: string;
+      labels?: string[];
+      times?: number[];
+      trajectories?: Record<string, number[]>;
+      aggregate?: Record<string, number>;
+      top_pattern?: string;
+      interpretation?: string;
+      limitations?: string[];
+    };
+    response_ensemble?: ResponseEnsemble;
     emotion_decoder?: { status: string; reason: string };
   };
 };
+export type ResponseEnsemble = {
+  profile: string;
+  values: Record<string, number | null>;
+  sources: {
+    tsam?: Record<string, number> | null;
+    kragel?: Record<string, number> | null;
+  };
+  source_weights: Record<string, number>;
+  active_sources: string[];
+  disagreement: Record<string, number>;
+  mean_disagreement: number | null;
+  confidence: string;
+  interpretation: string;
+};
+
 export type Experiment = {
   id: string;
   sequence: number;
@@ -112,6 +139,9 @@ export type Run = {
     scope?: string;
     policy?: string;
     planner?: string;
+    metric?: string;
+    baseline_response?: ResponseEnsemble;
+    best_response?: ResponseEnsemble;
   };
   experiments?: Experiment[];
   events?: RunEvent[];
@@ -129,7 +159,8 @@ export type Capability = {
     } | null;
   };
   tsam: { status: string; reason: string };
-  kragel: { status: string; reason: string };
+  kragel: { status: string; reason?: string; meaning?: string; profile?: string; missing?: string[] };
+  generation_providers?: { name: string; status: string; detail: string; capabilities: string[] }[];
   asr: { status: string; purpose: string };
   integrations: { name: string; status: string; purpose: string }[];
   modalities: Record<string, string>;

@@ -45,6 +45,35 @@ http://localhost:2718 is the actual local marimo application. `research/lab.py` 
 
 ## Deferred integrations
 
-`NEUROLOOP_PLANNER_ENABLED=false` remains in effect. W&B Inference will be connected later; no paid planner request or free-form chat model is enabled. The dedicated Neuro page runs documented local evidence commands and links to MCP. CoreWeave compute/storage, TypeSafe, Kragel activation and TSAM scientific validation remain deferred as requested.
+`NEUROLOOP_PLANNER_ENABLED=false` remains in effect. W&B Inference will be connected later; no paid planner request or free-form chat model is enabled. The dedicated Neuro page runs documented local evidence commands and links to MCP. Kragel and TSAM are now wired as experimental response sources. CoreWeave generation/compute, Ideogram 4, MiniMax H3 and TypeSafe remain unavailable until the corresponding access is actually configured.
 
 Official references: [Weave](https://docs.wandb.ai/weave/quickstart), [ARIA](https://docs.wandb.ai/aria/overview), [Launch](https://docs.wandb.ai/platform/launch/create-and-deploy-jobs), [W&B MCP](https://github.com/wandb/wandb-mcp-server), [marimo plotting](https://docs.marimo.io/api/plotting/).
+
+## September 11 build boundary
+
+The response-target loop does not depend on sponsor generation credits. Local controlled
+interventions, TRIBE, Kragel, TSAM, the experiment ledger, website and NeuroLoop MCP can
+exercise the full evaluate -> intervene -> re-evaluate -> retain/revert loop now.
+
+Sponsor-dependent creative generation is deliberately not claimed as implemented:
+
+| Provider | Current state | Activation condition |
+|---|---|---|
+| Ideogram 4 | `awaiting_sponsor_access` provider boundary only | Sponsor credits/API access supplied and a live contract test passes |
+| MiniMax H3 | `awaiting_sponsor_access` provider boundary only | Sponsor credits/model access supplied and a live contract test passes |
+| CoreWeave compute | `awaiting_sponsor_credits` | Provisioned resource plus tested deployment |
+
+The rest of the sponsor/service boundary remains explicit:
+
+| Service | Current use | Partner requirement |
+|---|---|---|
+| W&B Weave | Exports selected execution metadata and numerical results; prior remote verification recorded | Own W&B API key and writable project |
+| W&B Models | Stores experiment metadata used by research/Launch | W&B account/project |
+| CoreWeave ARIA | Reviewed actual experiment history; optional for local inference | Own ARIA access |
+| W&B Launch | Restricted bridge to the same local experiment queue; full workflow acceptance remains unfinished | Configured job, queue and local agent |
+| W&B MCP | Official read-only tools for W&B records | Own W&B credentials |
+| NeuroLoop MCP | Same domain services and ledger as the website | Local server/client configuration; no paid model API required |
+| marimo | Local research notebook, charts and tables | Local installation only |
+
+A sponsor name in the UI is never treated as evidence that the connection works. Runtime
+status and receipts are the source of truth.

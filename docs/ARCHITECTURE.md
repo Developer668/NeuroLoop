@@ -5,7 +5,7 @@ This document describes the implementation inspected during the September 10,
 See [AUDIT.md](AUDIT.md) for measured results and [REMAINING-WORK.md](REMAINING-WORK.md)
 for gaps. Implemented does not mean scientifically validated or ready for public deployment.
 
-**Recovery state:** GPU work and Launch are currently held by `data/inference-quarantine.json` after the 21:47 Pacific graphics crash. The flow below describes implemented execution; only review/API/research services run while the hold exists.
+**Recovery state:** `data/inference-quarantine.json` is still the persistent Windows safety hold after the graphics crash. Windows continues to omit model execution while that record exists. On Apple Silicon, `Start-NeuroLoop.sh` can explicitly enable the guarded MPS worker without deleting the hold. The Mac path keeps conservative memory checks and fails closed. The current memory-first V-JEPA2 configuration still needs one fresh uncached full-loop acceptance run.
 
 ## What the product actually does
 
@@ -50,7 +50,7 @@ flowchart TD
     Hold[Persistent execution hold] -. blocks new model work .-> Domain
 ```
 
-`scripts/manage.py` owns the API, Next.js server, research app and, when execution is enabled, the worker and restricted Launch agent. The current hold omits both executors.
+`scripts/manage.py` owns the API, Next.js server, research app and, when execution is enabled, the worker and restricted Launch agent. The persistent hold omits executors by default; the Mac launcher can explicitly start the guarded MPS worker while preserving the hold record. Launch remains separate and is not enabled by the Mac override.
 Windows job objects bind descendant lifetime to their owning supervisor. The
 worker uses a file lock to serialize GPU jobs. The API queues work and returns
 a run ID rather than keeping a request open for inference. Polling and recorded
@@ -176,3 +176,81 @@ integrations are enabled. Weave and W&B MCP have actual remotely verified result
 ## Dedicated Neuro page
 
 `/neuro` redirects to the workspace's Neuro view. It shares session authentication and calls `POST /api/neuro/command`. The five documented commands read the same ledger and receipt services and link to actual saved records. The composer preserves draft text in session storage, reports request errors and shows pixel/elapsed loading only during an actual request. Free-form responses explicitly state that AI conversation is unavailable; there is no enabled LLM, simulated microphone or in-web generation path. MCP connection instructions remain a separate workspace view for external agents.
+
+## Response-target closed loop (September 11, 2026)
+
+NeuroLoop now has two explicit optimization objectives. The original `reference_similarity`
+objective is preserved for controlled cortical-pattern research. The new
+`response_target` objective does not require a reference creative and is the product loop
+used for declared emotion targets.
+
+```text
+creative
+  ├─> frozen TRIBE ─> predicted fsaverage5 cortical response ─> Kragel pattern expression ─┐
+  └─> independent TSAM audiovisual inference ──────────────────────────────────────────────┤
+                                                                                             v
+                                                                                  transparent ensemble
+                                                                                             |
+                                                                                       TargetSpec
+                                                                                             |
+                                                                                 fixed target-distance
+                                                                                             |
+                                                                             controlled intervention policy
+                                                                                             |
+                                                                                         candidate
+                                                                                             └──> same evaluator
+```
+
+### Kragel decoder contract
+
+The seven 2015 Kragel BPLS emotion signatures are used as an **experimental decoder
+layer** for TRIBE, as requested for this project. The higher-resolution Kragel surface
+files are not index-resampled onto TRIBE. Instead NeuroLoop samples the published MNI
+volume maps through the documented Nilearn fsaverage5 white-to-pial cortical ribbon.
+Both hemispheres contain 10,242 vertices, matching TRIBE's released cortical head. The
+current local projection covers about 96.9% of the fsaverage5 vertices for each source
+map. Each TRIBE time point is spatially centered and normalized before expression
+against the normalized Kragel signature.
+
+The resulting values are spatial pattern-expression correlations. They are not emotion
+probabilities and are not claimed to be measured human reactions. Raw Kragel trajectories,
+source hashes, transform profile and limitations remain in each evaluation record.
+
+### TSAM contract
+
+TSAM remains independent from TRIBE. It receives the original audiovisual stimulus and
+returns eight uncalibrated class logits in five-second windows. It is never fed a TRIBE
+array. The staged macOS model environment pins the dependencies required by the upstream
+implementation and strict checkpoint loading is required at runtime.
+
+### Response ensemble
+
+`backend/neuroloop/response.py` combines only the explicitly available signals. Current
+profile `tsam55-kragel45-relative-evidence-v1` gives TSAM a 0.55 source weight and Kragel
+a 0.45 source weight for dimensions both models support. Kragel does not fabricate
+contempt or disgust evidence. Source scores, weights and disagreement remain separately
+visible. Missing sources cause a transparent degraded calculation, not invented data.
+
+The target metric `response-target-distance/v1` compares these relative model-evidence
+values with the user-declared `TargetSpec` and applies a disagreement penalty. It is an
+optimization score, not a percentage of viewers predicted to feel an emotion.
+
+### Intervention and generation boundary
+
+The closed loop is operational today with the existing deterministic local interventions
+(brightness, contrast, saturation and composed-headline timing where applicable). These
+are useful controlled interventions and provide an end-to-end search loop without an
+external generator.
+
+Ideogram 4 and MiniMax H3 are represented only by `GenerationProvider` capability
+contracts with status `awaiting_sponsor_access`. They intentionally fail closed until
+sponsor credits/model access are available. No request, result or cloud resource is
+fabricated. When enabled later, they must plug into the same candidate/evaluation loop;
+they must not create a second optimizer.
+
+### Fixed evaluator rule
+
+TRIBE profile, selected response readouts, ensemble profile, target and acceptance
+criteria remain fixed within a run. Only the intervention-selection policy adapts from
+recorded outcomes. This prevents the search process from improving its score by changing
+its evaluator.

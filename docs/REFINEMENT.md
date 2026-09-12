@@ -56,9 +56,6 @@ presentation. They establish software integration, not ad-response validity.
 
 Sources, download URLs and hashes are recorded in
 `data/verification/refinement/real-media/sources.json`.
-The resumable real workflow is `scripts/verify_real_media.py`; browser acceptance
-checks are `scripts/verify_refinement.py`. Their results are saved in the same
-verification directory. Failures are preserved in the run history.
+The resumable historical real-media workflow is `scripts/verify_real_media.py`. The active end-to-end release audit is `scripts/audit_system.py`, which verifies authenticated HTTP/MCP behavior, fresh bounded inference, exports, stored arrays, and database integrity. Historical browser captures remain under `data/verification/refinement/browser`.
 
-The Windows graphics-crash root cause, Kragel transfer validity and unavailable
-external credentials remain separate unresolved limitations.
+The Windows graphics-crash root cause, scientific validation of Kragel transfer, and unavailable external sponsor credentials remain separate limitations. The Kragel software bridge itself is active and tested on saved real TRIBE outputs.

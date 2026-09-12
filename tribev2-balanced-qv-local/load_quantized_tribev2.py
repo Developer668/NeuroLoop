@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import yaml
+import numpy as np
 
 import torch
 from torch import nn
@@ -26,9 +27,11 @@ def resolve_device(device='auto'):
     return 'cpu'
 
 class Int8Linear(nn.Module):
-    """Keep weights INT8, dequantize one layer at a time for portable CPU/CUDA inference.
+    """Keep weights INT8 and dequantize per forward on CPU/CUDA.
 
-    This saves resident weight memory; it is not a fused INT8 kernel or a speed promise.
+    This minimizes resident weight memory. On Apple MPS the INT8 buffers stay
+    quantized between layers and only the active layer is reconstructed for the
+    current forward pass, trading speed for a much lower unified-memory peak.
     """
     def __init__(self, in_features, out_features, bias):
         super().__init__()
@@ -102,19 +105,50 @@ def load_quantized_tribev2(repo_dir=ROOT, device='auto', cache_folder=None):
             video_module._fix_pixel_values(inputs)
             inputs = inputs.to(device=self.model.device, dtype=torch.bfloat16)
             with torch.inference_mode():
-                result = self.model(**inputs, output_hidden_states=True, skip_predictor=True)
-            # Neuralset converts features to numpy, which does not support BF16.
-            # Pooling in Neuralset happens on CPU. Do not hold or concatenate all
-            # 41 FP32 token layers on the laptop GPU alongside text/audio models.
-            result.hidden_states = tuple(x.to(device='cpu', dtype=torch.float32) for x in result.hidden_states)
-            return result
+                return self.model(**inputs, output_hidden_states=True, skip_predictor=True)
+
+        def predict_hidden_states(self, images, audio=None):
+            if self.model_name != 'facebook/vjepa2-vitg-fpc64-256':
+                return super().predict_hidden_states(images, audio)
+            inputs = self.processor(videos=list(images), return_tensors='pt', do_rescale=True)
+            video_module._fix_pixel_values(inputs)
+            pixel_values = inputs['pixel_values_videos'].to(
+                device=self.model.device, dtype=torch.bfloat16
+            )
+            encoder = self.model.encoder
+            # Transformers records 41 V-JEPA2 states: embedding output plus each of
+            # 40 encoder blocks. Neuralset's configured cache_n_layers=20 keeps these
+            # exact equidistant indices before token mean pooling. Reproduce that
+            # contract directly so the other 21 full token tensors never stay alive.
+            state_count = len(encoder.layer) + 1
+            keep = 20
+            selected = [int(round(x)) for x in np.linspace(0, state_count - 1, keep)]
+            wanted = set(selected)
+            pooled = []
+            with torch.inference_mode():
+                hidden = encoder.embeddings(pixel_values)
+                if 0 in wanted:
+                    pooled.append(hidden.mean(dim=1, keepdim=True))
+                for layer_index, layer in enumerate(encoder.layer, start=1):
+                    hidden = layer(hidden, None)[0]
+                    if layer_index in wanted:
+                        # Neuralset immediately applies token_aggregation='mean'.
+                        # Keeping a singleton token dimension makes its later mean a
+                        # no-op while preserving the expected B x L x tokens x D API.
+                        pooled.append(hidden.mean(dim=1, keepdim=True))
+            if len(pooled) != keep:
+                raise RuntimeError(f'Expected {keep} selected V-JEPA2 layers, got {len(pooled)}')
+            return torch.stack(pooled, dim=1)
 
     # Neuralset constructs video wrappers lazily during feature extraction.
     video_module._HFVideoModel = LocalVideoModel
     tribe = TribeModel.from_pretrained(
         runtime, checkpoint_name='../best.ckpt', device=device, cache_folder=cache_folder,
         config_update={'data.video_feature.frequency': 2.0,
-                       'data.video_feature.image.batch_size': 4})
+                       # Apple unified memory is the limiting resource on the local Mac.
+                       # Batch size changes only feature-extraction batching, not sampling
+                       # frequency, model weights, or the resulting feature contract.
+                       'data.video_feature.image.batch_size': 1 if device == 'mps' else 4})
     # TRIBE concatenates modalities at identical time indices. Keep the official
     # 2 Hz shared grid; video-only 1.5 Hz produces 150 vs 200 samples per segment.
     return tribe
