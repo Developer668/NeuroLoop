@@ -37,16 +37,30 @@ class Settings(BaseSettings):
     ffprobe: str = "ffprobe"
     ffmpeg: str = "ffmpeg"
     weave_enabled: bool = False
+    wandb_artifacts_enabled: bool = False
     wandb_api_key: SecretStr = Field(default=SecretStr(""), validation_alias="WANDB_API_KEY")
     wandb_project: str = Field(default="", validation_alias="WANDB_PROJECT")
     inference_model: str = ""
-    inference_max_tokens: int = 3000
+    inference_max_tokens: int = Field(default=32768, ge=1024, le=32768)
+    inference_timeout_seconds: float = Field(default=600, ge=30, le=900)
     reasoner_cost_ceiling_usd: float | None = Field(default=None, ge=0)
     typesafe_cost_ceiling_usd: float | None = Field(default=None, ge=0)
     typesafe_api_key: SecretStr = Field(default=SecretStr(""), validation_alias="TYPESAFE_API_KEY")
     typesafe_model: str = "jev-latest"
     provider: str = "local"
     provider_workload_approved: bool = False
+    model_long_edge: int = Field(default=1024, ge=512, le=2048)
+    model_steps: int = Field(default=4, ge=4, le=30)
+    worker_idle_seconds: int = Field(default=300, ge=30, le=3600)
+    vision_model: str = ""
+    vision_revision: str = "operator-configured-v1"
+    vision_max_tokens: int = Field(default=32768, ge=1024, le=32768)
+    enable_h3: bool = False
+    enable_ideogram: bool = False
+    enable_legacy_evaluators: bool = False
+    research_root: Path = ROOT
+    research_bundle_path: Path | None = None
+    tsam_research_license_accepted: bool = False
     meta_access_token: SecretStr = Field(default=SecretStr(""), validation_alias="META_ACCESS_TOKEN")
     meta_graph_version: str = ""
 

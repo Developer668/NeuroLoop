@@ -1,2 +1,4 @@
-import { redirect } from "next/navigation";
-export default function Page() { redirect("/workspace"); }
+import Landing from "@/components/Landing";
+export default function Page() {
+  return <Landing />;
+}

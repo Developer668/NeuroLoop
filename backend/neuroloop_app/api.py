@@ -5,6 +5,7 @@ from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from io import BytesIO
 from pathlib import Path
+from typing import Literal
 import hashlib
 import hmac
 import json
@@ -17,11 +18,11 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from .config import ROOT, Settings
-from .db import Asset, AuthSession, Creative, Deployment, Evaluation, Job, Run, Store, Trace, Worker, record
-from .domain import (CampaignSpec, CompleteJob, DeploymentSpec, FailJob, FeedbackRequest,
+from .db import ArtifactBackup, Asset, AuthSession, Creative, Deployment, Evaluation, NotebookEvidence, Job, Run, Store, Trace, Worker, record
+from .domain import (CampaignSpec, CompleteJob, DeploymentSpec, EvaluationResult, ModelProvenance, FailJob, FeedbackRequest,
                      LeaseRequest, ResearchProposal, ResumeRequest, StartRun, WorkerHello, digest, now, uid)
 from .engine import DomainError, LoopEngine, required, emit, close_trace
-from .storage import ObjectStore, StorageError
+from .storage import ObjectStore, StorageError, inspect_media
 from .telemetry import WeaveExporter
 from .meta import MetaService, MetaFailure
 
@@ -33,6 +34,25 @@ class Login(BaseModel):
 class Approval(BaseModel):
     review_digest: str = Field(min_length=64, max_length=64)
     confirmation: str
+
+
+class NotebookReport(BaseModel):
+    evaluator: Literal["generation", "summary", "inventory"]
+    status: Literal["SUCCEEDED", "FAILED"]
+    provenance: ModelProvenance
+    observations: dict
+    scores: dict = Field(default_factory=dict)
+    limitations: list[str] = Field(default_factory=list)
+    artifact_ids: list[str] = Field(default_factory=list, max_length=0)
+
+
+class EvidenceImport(BaseModel):
+    input_asset_id: str
+    input_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    source_receipt: str = Field(min_length=1, max_length=300)
+    source_kind: Literal["reference_evaluation", "generated_ad_evaluation"]
+    title: str = Field(min_length=1, max_length=250)
+    result: EvaluationResult | NotebookReport
 
 
 class TooLarge(Exception):
@@ -73,6 +93,8 @@ def create_app(settings: Settings | None = None):
     objects = ObjectStore(settings)
     engine = LoopEngine(store, objects)
     exporter = WeaveExporter(store)
+    from .artifact_backup import ArtifactExporter
+    artifact_exporter = ArtifactExporter(store, objects, engine)
     meta = MetaService(store, objects)
     rate_windows = defaultdict(deque)
 
@@ -104,7 +126,18 @@ def create_app(settings: Settings | None = None):
                     await asyncio.wait_for(stop.wait(), timeout=5)
                 except asyncio.TimeoutError:
                     pass
-        tasks = [asyncio.create_task(maintain()), asyncio.create_task(meta_queue())]
+        async def backup_queue():
+            while not stop.is_set():
+                try:
+                    await asyncio.to_thread(artifact_exporter.drain)
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).exception("Artifact backup queue failed")
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    pass
+        tasks = [asyncio.create_task(maintain()), asyncio.create_task(meta_queue()), asyncio.create_task(backup_queue())]
         yield
         stop.set()
         await asyncio.gather(*tasks)
@@ -317,6 +350,134 @@ def create_app(settings: Settings | None = None):
     def propose(body: ResearchProposal):
         return engine.propose_policy(body)
 
+    @app.get("/api/v2/workers/research-bundle", dependencies=[Depends(worker)])
+    def research_bundle():
+        path = settings.research_bundle_path
+        if path is None or not path.is_file():
+            raise HTTPException(404, "Research bundle is not configured")
+        return FileResponse(path, media_type="application/zip", filename="neuroloop-research-runtime.zip",
+                            headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/v2/workers/application-runtime", dependencies=[Depends(worker)])
+    def application_runtime():
+        import zipfile
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            for path in sorted(Path(__file__).parent.glob("*.py")):
+                archive.write(path, "neuroloop_app/" + path.name)
+        return StreamingResponse(iter([buffer.getvalue()]), media_type="application/zip")
+
+    @app.post("/api/v2/workers/evidence", dependencies=[Depends(worker)], status_code=201)
+    async def import_evidence(metadata: str = Form(...), cortical: UploadFile | None = File(None)):
+        body = EvidenceImport.model_validate_json(metadata)
+        if body.result.artifact_ids:
+            raise DomainError("Evidence artifacts must be uploaded with their receipt", 422)
+        temp = objects.temp / uid()
+        try:
+            info = None
+            if cortical:
+                with temp.open("xb") as stream:
+                    size = 0
+                    while chunk := await cortical.read(1024 * 1024):
+                        size += len(chunk)
+                        if size > settings.max_upload_bytes:
+                            raise HTTPException(413, "Cortical upload exceeds maximum size")
+                        stream.write(chunk)
+                info = inspect_media(temp, settings, internal=True)
+                if info.kind != "cortical" or body.result.evaluator != "tribe":
+                    raise DomainError("Expected a validated TRIBE cortical archive", 422)
+            if body.result.evaluator == "tribe" and body.result.status == "SUCCEEDED" and info is None:
+                raise DomainError("Successful TRIBE receipts require the real cortical artifact", 422)
+            with store.transaction() as session:
+                source = required(session, Asset, body.input_asset_id)
+                if source.sha256 != body.input_sha256:
+                    raise DomainError("Receipt does not match the input media checksum", 422)
+                parent_id = body.result.observations.get("parent_asset_id") if body.result.evaluator == "generation" else None
+                if parent_id:
+                    parent = required(session, Asset, parent_id)
+                    if parent.campaign_id != source.campaign_id or parent.id == source.id:
+                        raise DomainError("Invalid revision parent", 422)
+                    citations = body.result.observations.get("based_on_evidence_ids", [])
+                    if not isinstance(citations, list) or not citations:
+                        raise DomainError("A revision must cite actual parent evidence", 422)
+                    for citation in citations:
+                        evidence_row = required(session, NotebookEvidence, citation)
+                        if evidence_row.input_asset_id != parent.id:
+                            raise DomainError("Revision evidence does not evaluate its parent", 422)
+                previous = session.scalar(select(NotebookEvidence).where(NotebookEvidence.source_receipt == body.source_receipt))
+                request_hash = digest(body.model_dump())
+                if previous:
+                    if previous.result.get("import_hash") != request_hash:
+                        raise DomainError("Receipt identifier already contains different evidence", 409)
+                    if info:
+                        existing = required(session, Asset, previous.result["artifact_ids"][0])
+                        if hashlib.sha256(temp.read_bytes()).hexdigest() != existing.sha256:
+                            raise DomainError("Receipt identifier already contains different cortical bytes", 409)
+                    return record(previous)
+                result = body.result.model_dump()
+                result["import_hash"] = request_hash
+                if info:
+                    identity = uid()
+                    key, sha, size = objects.put(temp, source.campaign_id, identity)
+                    session.add(Asset(id=identity, campaign_id=source.campaign_id, name="cortical.npz", kind=info.kind, mime=info.mime,
+                                      sha256=sha, size=size, object_key=key, details=info.details))
+                    result["artifact_ids"] = [identity]
+                row = NotebookEvidence(campaign_id=source.campaign_id, input_asset_id=source.id, source_receipt=body.source_receipt,
+                    source_kind=body.source_kind, title=body.title, evaluator=body.result.evaluator,
+                    comparison_key=body.result.provenance.comparison_key, result=result)
+                session.add(row)
+                session.flush()
+                return record(row)
+        finally:
+            temp.unlink(missing_ok=True)
+            if cortical:
+                await cortical.close()
+
+    @app.get("/api/v2/evidence", dependencies=[Depends(operator)])
+    def notebook_evidence(campaign_id: str | None = None):
+        with store.read() as session:
+            query = select(NotebookEvidence).order_by(NotebookEvidence.created_at.desc()).limit(200)
+            if campaign_id:
+                query = select(NotebookEvidence).where(NotebookEvidence.campaign_id == campaign_id).order_by(NotebookEvidence.created_at.desc()).limit(200)
+            imported = [{**record(row), "input_asset": record(required(session, Asset, row.input_asset_id)),
+                     "artifacts": [record(required(session, Asset, identity)) for identity in row.result.get("artifact_ids", [])]}
+                    for row in session.scalars(query)]
+            evaluations = select(Evaluation).join(Creative, Evaluation.creative_id == Creative.id)
+            if campaign_id:
+                evaluations = evaluations.where(Creative.campaign_id == campaign_id)
+            for row in session.scalars(evaluations.order_by(Evaluation.created_at.desc()).limit(200)):
+                creative = required(session, Creative, row.creative_id)
+                if creative.output_asset_id:
+                    imported.append({**record(row), "input_asset_id": creative.output_asset_id,
+                        "input_asset": record(required(session, Asset, creative.output_asset_id)),
+                        "artifacts": [record(required(session, Asset, identity)) for identity in row.result.get("artifact_ids", [])],
+                        "source_kind": "campaign_loop", "source_receipt": row.job_id,
+                        "title": f"Round {creative.round} · {row.evaluator.upper()} · {creative.id[:8]}"})
+            return sorted(imported, key=lambda row: row["created_at"], reverse=True)
+
+    @app.get("/api/v2/backups", dependencies=[Depends(operator)])
+    def backups():
+        with store.read() as session:
+            return {"enabled": settings.wandb_artifacts_enabled, "project": settings.wandb_project,
+                    "items": [record(row) for row in session.scalars(select(ArtifactBackup))]}
+
+    @app.get("/api/v2/workers/evidence-context/{asset_id}", dependencies=[Depends(worker)])
+    def evidence_context(asset_id: str, run_id: str | None = None):
+        with store.read() as session:
+            asset = required(session, Asset, asset_id)
+            rows = [record(row) for row in session.scalars(select(NotebookEvidence).where(
+                NotebookEvidence.input_asset_id == asset_id, NotebookEvidence.evaluator != "summary"))]
+            if run_id and required(session, Run, run_id).campaign_id != asset.campaign_id:
+                raise DomainError("Run and media belong to different campaigns", 422)
+            return {"asset":record(asset), "evidence":rows, "run":engine.snapshot(run_id) if run_id else None}
+
+    @app.post("/api/v2/workers/evidence-files/{asset_id}", dependencies=[Depends(worker)], status_code=201)
+    async def evidence_file(asset_id: str, file: UploadFile = File(...)):
+        with store.read() as session:
+            source = required(session, Asset, asset_id)
+            campaign_id = source.campaign_id
+        return await save_upload(campaign_id, file)
+
     @app.post("/api/v2/workers/register", dependencies=[Depends(worker)])
     def worker_register(body: WorkerHello):
         return engine.register_worker(body)
@@ -327,7 +488,7 @@ def create_app(settings: Settings | None = None):
 
     @app.post("/api/v2/jobs/{job_id}/heartbeat", dependencies=[Depends(worker)])
     def heartbeat(job_id: str, body: LeaseRequest):
-        return engine.heartbeat(job_id, body.worker_id, body.lease_token)
+        return engine.heartbeat(job_id, body.worker_id, body.lease_token, body.progress)
 
     @app.post("/api/v2/jobs/{job_id}/complete", dependencies=[Depends(worker)])
     def complete(job_id: str, body: CompleteJob):
@@ -382,7 +543,9 @@ def create_app(settings: Settings | None = None):
     def cortical_frame(evaluation_id: str, index: int = 0, reference: str | None = None):
         import numpy as np
         def read_frame(session, identity):
-            evaluation = required(session, Evaluation, identity)
+            evaluation = session.get(Evaluation, identity) or session.get(NotebookEvidence, identity)
+            if evaluation is None:
+                raise DomainError("Evaluation not found", 404)
             if evaluation.evaluator != "tribe" or evaluation.result["status"] != "SUCCEEDED":
                 raise DomainError("No real TRIBE cortical output for this evaluation", 404)
             candidates = [required(session, Asset, a) for a in evaluation.result.get("artifact_ids", [])]
@@ -402,6 +565,39 @@ def create_app(settings: Settings | None = None):
                 values = values - reference_values
                 value_range = [float(values.min()), float(values.max())]
         return {"values": values.tolist(), "range": value_range, "time": timestamp, "label": "Predicted Average Cortical Response"}
+
+    @app.get("/api/evaluations/{evaluation_id}/regions", dependencies=[Depends(operator)])
+    def cortical_regions(evaluation_id: str):
+        import numpy as np
+        path = ROOT / "data" / "geometry" / "atlas.json"
+        if not path.is_file():
+            raise DomainError("Anatomical atlas is not installed", 404)
+        raw = path.read_bytes()
+        atlas = json.loads(raw)
+        if atlas.get("mesh") != "fsaverage5" or any(len(atlas.get(h, [])) != 10242 for h in ("left", "right")):
+            raise DomainError("Anatomical atlas does not match fsaverage5", 422)
+        with store.read() as session:
+            row = session.get(Evaluation, evaluation_id) or session.get(NotebookEvidence, evaluation_id)
+            if row is None or row.evaluator != "tribe" or row.result["status"] != "SUCCEEDED":
+                raise DomainError("Successful TRIBE evidence required", 404)
+            assets = [required(session, Asset, a) for a in row.result.get("artifact_ids", [])]
+            asset = next((a for a in assets if a.kind == "cortical"), None)
+            if asset is None:
+                raise DomainError("Cortical artifact unavailable", 404)
+            with np.load(BytesIO(objects.read(asset.object_key)), allow_pickle=False) as data:
+                values, times = data["values"], data["times"].tolist()
+            regions = []
+            for hemisphere, offset in (("left", 0), ("right", 10242)):
+                mapping = np.asarray(atlas[hemisphere])
+                for index, label in enumerate(atlas["labels"]):
+                    mask = mapping == index
+                    if not mask.any() or label.lower() in {"unknown", "medial_wall"}:
+                        continue
+                    x = values[:, offset:offset+10242][:, mask]
+                    regions.append({"id":f"{hemisphere}:{index}","hemisphere":hemisphere,"name":label.replace("_", " "),
+                        "vertices":int(mask.sum()),"mean":x.mean(axis=1).tolist(),"rms":float(np.sqrt(np.mean(x**2)))})
+            return {"atlas":atlas["atlas"],"mesh":"fsaverage5","sha256":hashlib.sha256(raw).hexdigest(),"times":times,
+                    "regions":regions,"interpretation":"Anatomical averages of model predictions; no cognitive function or emotion is inferred."}
 
     @app.post("/api/v2/experiments", dependencies=[Depends(operator)], status_code=201)
     def experiment_create(body: DeploymentSpec):

@@ -34,12 +34,17 @@ def inspect_media(path: Path, settings: Settings, internal: bool = False) -> Med
     # Image parsing is a real decoder check, not trust in user extensions/MIME.
     if header.startswith((b"\x89PNG", b"\xff\xd8\xff", b"GIF8")) or (header[:4] == b"RIFF" and header[8:12] == b"WEBP"):
         from PIL import Image
-        with Image.open(path) as image:
-            width, height = image.size
-            if width * height > settings.max_pixels or getattr(image, "n_frames", 1) > 1:
-                raise StorageError("Oversized or animated images are not supported")
-            mime = Image.MIME.get(image.format, "application/octet-stream")
-            image.verify()
+        try:
+            with Image.open(path) as image:
+                width, height = image.size
+                if width * height > settings.max_pixels or getattr(image, "n_frames", 1) > 1:
+                    raise StorageError("Oversized or animated images are not supported")
+                mime = Image.MIME.get(image.format, "application/octet-stream")
+                image.verify()
+        except StorageError:
+            raise
+        except (OSError, ValueError, SyntaxError, Image.DecompressionBombError) as exc:
+            raise StorageError("Image is damaged or cannot be decoded") from exc
         return MediaInfo("image", mime, {"width": width, "height": height})
     if internal and header.startswith(b"PK"):
         with zipfile.ZipFile(path) as archive:

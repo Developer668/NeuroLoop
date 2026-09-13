@@ -17,7 +17,7 @@ from .config import Settings
 from .db import (Asset, Campaign, Creative, Decision, Deployment, Evaluation, Event,
                  Feedback, Intervention, Job, PolicyProposal, Run, Store, Trace, Worker, Deployment, record)
 from .domain import (CampaignSpec, CandidatePlan, CompleteJob, DecisionResult, DeploymentSpec,
-                     EvaluationResult, FailJob, FeedbackRequest, GenerationResult, PlanResult,
+                     EvaluationResult, FailJob, FeedbackRequest, GenerationResult, PlanResult, PlanReview,
                      ResearchProposal, RunConfig, RunState, StartRun, TERMINAL, PAUSED,
                      WorkerHello, digest, now, uid)
 from .storage import ObjectStore, StorageError, inspect_media, extract_document
@@ -48,6 +48,8 @@ def emit(session, run, kind, **detail):
 
 
 def close_trace(session, identity, output, error=None):
+    if identity is None:
+        return  # A queued job has no execution span yet.
     trace = session.get(Trace, identity)
     if trace:
         trace.output, trace.exception, trace.ended_at = output, error, now()
@@ -163,7 +165,7 @@ class LoopEngine:
                  "size": a.size, "details": a.details, "download_path": f"/api/v2/assets/{a.id}/content"}
                 for a in [required(session, Asset, identity) for identity in ids]]
 
-    def _plan_job(self, session, run, parents):
+    def _plan_job(self, session, run, parents, conditioning="media"):
         cfg = RunConfig.model_validate(run.snapshot["config"])
         remaining = cfg.max_candidates - run.stats["generation_count"]
         specs = []
@@ -178,11 +180,14 @@ class LoopEngine:
             return
         recent_feedback = [record(f) for f in session.scalars(select(Feedback).where(Feedback.campaign_id == run.campaign_id).order_by(Feedback.created_at.desc()).limit(30))]
         prior = [record(i) for i in session.scalars(select(Intervention).where(Intervention.campaign_id == run.campaign_id).order_by(Intervention.created_at.desc()).limit(40))]
-        payload = {"snapshot": run.snapshot, "round": run.round, "candidate_slots": specs,
+        payload = {"snapshot": run.snapshot, "round": run.round, "candidate_slots": specs, "conditioning": conditioning,
                    "references": self._asset_refs(session, run.snapshot["reference_asset_ids"]),
-                   "parents": [{"creative": record(p), "evidence": self._evidence(session, p)} for p in parents],
+                   "parents": [{"creative": record(p), "asset": self._asset_refs(session, [p.output_asset_id])[0], "evidence": self._evidence(session, p)} for p in parents],
                    "human_feedback": recent_feedback, "intervention_history": prior,
                    "last_decision": run.stats.get("last_decision")}
+        capability = "generate_" + run.snapshot["campaign"]["media_kind"]
+        payload["generator_contracts"] = [w.capabilities[capability] for w in session.scalars(select(Worker))
+            if w.capabilities.get(capability, {}).get("status") == "READY"]
         self._enqueue(session, run, "PLAN", "reasoner", payload, f"{run.id}:plan:{run.round}")
         run.state = RunState.PLANNING if run.round == 0 else RunState.REGENERATING
 
@@ -301,7 +306,11 @@ class LoopEngine:
             worker = required(session, Worker, worker_id)
             worker.heartbeat_at = now()
             if progress:
-                job.progress = {**job.progress, "message": str(progress.get("message", ""))[:300]}
+                job.progress = {**job.progress, "message": str(progress.get("message", ""))[:300],
+                                "updated_at": now(), "phase": str(progress.get("phase", job.kind))[:50]}
+                elapsed = progress.get("elapsed_seconds")
+                if isinstance(elapsed, (int, float)) and 0 <= elapsed <= 86400:
+                    job.progress = {**job.progress, "elapsed_seconds": elapsed}
             return {"cancelled": False, "lease_until": job.lease_until, "remaining_wall_seconds": remaining}
 
     def recover_expired(self):
@@ -336,7 +345,25 @@ class LoopEngine:
             was_uncertain = job.status == "UNCERTAIN"
             if job.kind == "PLAN":
                 result = PlanResult.model_validate(request.result)
-                self._complete_plan(session, run, job, result)
+                self._validate_plan(session, run, job, result)
+                self._enqueue(session, run, "REVIEW_PLAN", "typesafe", {**job.payload, "plan": result.model_dump()}, f"{job.id}:review")
+            elif job.kind == "REVIEW_PLAN":
+                result = PlanReview.model_validate(request.result)
+                if result.plan_hash != digest(job.payload["plan"]):
+                    raise DomainError("TypeSafe reviewed a different plan", 422)
+                from .sponsors import TypeSafeKernel, ProviderFailure
+                try:
+                    choice, confidence, _ = TypeSafeKernel.validate_choice(result.raw_response.get("answers", {}).get("plan_gate"), {"APPROVE", "REJECT"})
+                except (ProviderFailure, AttributeError) as exc:
+                    raise DomainError("TypeSafe review receipt is invalid", 422) from exc
+                if choice != result.choice or confidence != result.confidence or result.raw_response.get("model") != result.model:
+                    raise DomainError("TypeSafe review receipt is inconsistent", 422)
+                if result.choice != "APPROVE":
+                    self._review(session, run, "TYPESAFE_PLAN_REJECTED")
+                elif result.confidence < RunConfig.model_validate(run.snapshot["config"]).decision_confidence_floor:
+                    self._review(session, run, "TYPESAFE_PLAN_LOW_CONFIDENCE")
+                else:
+                    self._complete_plan(session, run, job, PlanResult.model_validate(job.payload["plan"]))
             elif job.kind == "GENERATE":
                 result = GenerationResult.model_validate(request.result)
                 creative = required(session, Creative, job.creative_id)
@@ -371,7 +398,12 @@ class LoopEngine:
                          "model": request.result.get("model") or request.result.get("provenance", {}).get("model"),
                          "gpu_seconds": request.result.get("gpu_seconds"), "cost_usd": request.result.get("cost_usd"),
                          "decision": request.result.get("decision"), "confidence": request.result.get("confidence"),
-                         "scores": request.result.get("scores"), "usage": request.result.get("usage")})
+                         "scores": request.result.get("scores"), "usage": request.result.get("usage"),
+                         "plan_hash": request.result.get("plan_hash"), "plan_review": request.result.get("choice"),
+                         "candidate_edits": [{"parent_creative_id": p.get("parent_creative_id"), "edit_intent": p.get("edit_intent")} for p in request.result.get("candidates", [])],
+                         "selected_creative_ids": request.result.get("selected_creative_ids"),
+                         "response_delta": run.stats.get("last_gain") if job.kind == "DECIDE" else None,
+                         "vision_receipt": request.result.get("observations", {}).get("provider_receipt")})
             emit(session, run, "JOB_COMPLETED", job_id=job.id, job_type=job.kind, creative_id=job.creative_id)
             if was_uncertain and run.stop_reason == "GENERATION_LEASE_LOST_RECONCILE_BEFORE_RETRY":
                 run.state, run.stop_reason = RunState.GENERATING, None
@@ -388,7 +420,29 @@ class LoopEngine:
             stats["known_cost_usd"] += result["cost_usd"]
         run.stats = stats
 
+    def _validate_plan(self, session, run, job, result):
+        for plan in result.candidates:
+            if not plan.parent_creative_id:
+                continue
+            hypothesis = plan.edit_intent.optimization
+            if hypothesis is None:
+                raise DomainError("Regeneration requires observation, visual evidence, hypothesis and modification", 422)
+            evaluations = {e.id: e for e in session.scalars(select(Evaluation).where(Evaluation.creative_id == plan.parent_creative_id, Evaluation.run_id == run.id))}
+            observation = hypothesis.observation
+            sensor = evaluations.get(observation.evaluation_id)
+            visual = evaluations.get(hypothesis.creative_evidence.evaluation_id)
+            if sensor is None or visual is None or visual.evaluator != "vision":
+                raise DomainError("Optimization must cite parent response and vision evaluations", 422)
+            score = sensor.result.get("scores", {}).get(observation.response_metric)
+            if sensor.result.get("status") != "SUCCEEDED" or not score or score["value"] != observation.value:
+                raise DomainError("Optimization observation does not match recorded score", 422)
+            if observation.time_range is not None:
+                raise DomainError("Aggregate scores cannot establish time-local response measurements", 422)
+            if not {observation.evaluation_id, hypothesis.creative_evidence.evaluation_id} <= set(plan.edit_intent.reasoning_evidence_ids):
+                raise DomainError("Optimization citations must be included in EditIntent evidence IDs", 422)
+
     def _complete_plan(self, session, run, job, result):
+        self._validate_plan(session, run, job, result)
         slots = job.payload["candidate_slots"]
         if len(result.candidates) != len(slots):
             raise DomainError("Reasoner must fill exactly the allocated candidate slots", 422)
@@ -412,11 +466,11 @@ class LoopEngine:
                 if not locked <= set(plan.edit_intent.preserve):
                     raise DomainError("EditIntent must preserve every locked brand requirement", 422)
             creative = Creative(id=uid(), run_id=run.id, campaign_id=run.campaign_id, parent_id=plan.parent_creative_id,
-                                round=run.round, branch=index, creation_type="regeneration" if plan.parent_creative_id else "initial",
+                                round=run.round, branch=index, creation_type=("text_alternative" if job.payload.get("conditioning") == "text_alternative" else "regeneration") if plan.parent_creative_id else "initial",
                                 plan=plan.model_dump(), input_asset_ids=refs, status="QUEUED")
             session.add(creative)
             session.flush()
-            payload = {"campaign": run.snapshot["campaign"], "creative_id": creative.id, "plan": plan.model_dump(),
+            payload = {"campaign": run.snapshot["campaign"], "creative_id": creative.id, "plan": plan.model_dump(), "conditioning": job.payload.get("conditioning", "media"),
                        "references": self._asset_refs(session, refs), "current_creative_asset_id": refs[0] if plan.parent_creative_id else None,
                        "media_kind": run.snapshot["campaign"]["media_kind"]}
             self._enqueue(session, run, "GENERATE", f"generate_{payload['media_kind']}", payload, f"{creative.id}:generate", creative.id)
@@ -435,11 +489,11 @@ class LoopEngine:
             job.error = {"code": request.code, "detail": request.detail}
             if request.code == "UNCERTAIN":
                 job.status, run.state, run.stop_reason = "UNCERTAIN", RunState.NEEDS_ATTENTION, "UNKNOWN_PROVIDER_OUTCOME"
-            elif request.safe_to_retry and (request.code in {"TRANSIENT", "OUT_OF_MEMORY"} or (request.code == "INVALID_OUTPUT" and job.kind in {"PLAN", "DECIDE"})) and job.attempt < job.max_attempts:
+            elif request.safe_to_retry and (request.code in {"TRANSIENT", "OUT_OF_MEMORY"} or (request.code == "INVALID_OUTPUT" and job.kind in {"PLAN", "REVIEW_PLAN", "DECIDE"})) and job.attempt < job.max_attempts:
                 job.status, job.available_at = "RETRY", now() + min(60, 2 ** job.attempt)
             else:
                 job.status = "BLOCKED" if request.code in {"NOT_CONFIGURED", "UNAVAILABLE"} else "FAILED"
-                if job.kind in {"PLAN", "DECIDE"} or job.status == "BLOCKED":
+                if job.kind in {"PLAN", "REVIEW_PLAN", "DECIDE"} or job.status == "BLOCKED":
                     run.state, run.stop_reason = RunState.NEEDS_ATTENTION, request.code
                 elif job.creative_id and job.kind == "GENERATE":
                     creative = required(session, Creative, job.creative_id)
@@ -576,6 +630,10 @@ class LoopEngine:
                    "allowed_actions": ["KEEP", "REGENERATE", "GENERATE_ALTERNATIVE", "RUN_MORE_EVALUATION", "ASK_HUMAN", "READY_FOR_DEPLOYMENT", "STOP", "REJECT"],
                    "incumbent_creative_id": run.champion_id,
                    "history": [record(d) for d in session.scalars(select(Decision).where(Decision.run_id == run.id))]}
+        generator = worker.capabilities.get("generate_" + run.snapshot["campaign"]["media_kind"], {}) if worker else {}
+        if generator.get("supports_regeneration") is False:
+            payload["allowed_actions"].remove("REGENERATE")
+        payload["generator_contract"] = generator
         self._enqueue(session, run, "DECIDE", "typesafe", payload, f"{run.id}:decide:{run.round}:{run.stats.get('extra_evaluations',0)}")
         run.state = RunState.DECIDING
 
@@ -597,6 +655,12 @@ class LoopEngine:
             old_quality = bundles.get(run.champion_id, {}).get("quality", {}).get("value")
             new_quality = bundles[selected[0]]["quality"]["value"]
             gain = None if old_quality is None else new_quality - old_quality
+            if gain is not None and gain < 0 and action not in {"ASK_HUMAN", "STOP", "REJECT"}:
+                # A lower-scoring proposal cannot silently replace the incumbent.
+                # The comparison here is only the common vision-quality proxy.
+                selected = [run.champion_id]
+                new_quality = old_quality
+                action, override = "KEEP", "REVERTED_LOWER_PROXY_QUALITY"
             run.stats = {**run.stats, "plateau": (run.stats["plateau"] + 1) if gain is not None and gain < cfg.min_improvement else 0,
                          "last_proxy_quality": new_quality, "last_gain": gain, "last_decision": result.model_dump(exclude={"raw_response"})}
             run.champion_id, run.selected_ids = selected[0], selected
@@ -634,8 +698,10 @@ class LoopEngine:
         if action in {"REGENERATE", "GENERATE_ALTERNATIVE"}:
             run.round += 1
             parents = [required(session, Creative, identity) for identity in selected]
-            # Alternatives remain reference-conditioned children, not lineage resets.
-            self._plan_job(session, run, parents)
+            # Text-only generators keep evidence lineage, but must not claim to
+            # edit the parent's pixels. Media-capable alternatives still use them.
+            conditioning = "text_alternative" if action == "GENERATE_ALTERNATIVE" and job.payload.get("generator_contract", {}).get("supports_regeneration") is False else "media"
+            self._plan_job(session, run, parents, conditioning=conditioning)
         elif action == "RUN_MORE_EVALUATION":
             if run.stats.get("extra_evaluations", 0) >= 1:
                 self._review(session, run, "EXTRA_EVALUATION_LIMIT")

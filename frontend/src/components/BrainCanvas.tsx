@@ -125,6 +125,7 @@ export default function BrainCanvas({
           .getCenter(new THREE.Vector3());
         group.position.sub(center);
         scene.add(group);
+        const radius = new THREE.Box3().setFromObject(group).getBoundingSphere(new THREE.Sphere()).radius;
         const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 2000);
         camera.position.set(185, 88, 230);
         controls = new OrbitControls(camera, renderer.domElement);
@@ -132,7 +133,14 @@ export default function BrainCanvas({
         controls.enablePan = false;
         controls.enabled = !cinematic;
         controls.minDistance = 190;
-        controls.maxDistance = 480;
+        controls.maxDistance = 1400;
+        const fitCamera = () => {
+          const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+          const limitingFov = Math.min(halfFov, Math.atan(Math.tan(halfFov) * camera.aspect));
+          camera.position.set(185, 88, 230).normalize().multiplyScalar(radius / Math.sin(limitingFov) * 1.15);
+          controls?.target.set(0, 0, 0);
+          controls?.update();
+        };
         const render = () => renderer?.render(scene, camera);
         const resize = () => {
           if (!renderer) return;
@@ -141,6 +149,7 @@ export default function BrainCanvas({
           renderer.setSize(width, height);
           camera.aspect = width / Math.max(height, 1);
           camera.updateProjectionMatrix();
+          fitCamera();
           render();
         };
         controls.addEventListener("change", render);
@@ -166,9 +175,7 @@ export default function BrainCanvas({
             render();
           },
           reset: () => {
-            camera.position.set(185, 88, 230);
-            controls?.target.set(0, 0, 0);
-            controls?.update();
+            fitCamera();
             render();
           },
         };

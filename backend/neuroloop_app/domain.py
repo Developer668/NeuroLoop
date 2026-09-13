@@ -127,12 +127,45 @@ class StartRun(Contract):
     reference_asset_ids: list[str] = Field(default_factory=list, max_length=30)
 
 
+class EvidenceObservation(Contract):
+    evaluation_id: str = Field(min_length=1)
+    response_metric: str = Field(min_length=1)
+    value: float = Field(ge=0, le=1)
+    # Null for aggregate scores; do not invent temporal measurements.
+    time_range: tuple[float, float] | None = None
+
+    @field_validator("time_range")
+    @classmethod
+    def ordered_range(cls, value):
+        if value is not None and not 0 <= value[0] <= value[1]:
+            raise ValueError("Evidence range must be ordered and nonnegative")
+        return value
+
+
+class CreativeEvidence(Contract):
+    evaluation_id: str = Field(min_length=1)
+    description: str = Field(min_length=1, max_length=3000)
+
+
+class OptimizationHypothesis(Contract):
+    observation: EvidenceObservation
+    creative_evidence: CreativeEvidence
+    explanation: str = Field(min_length=1, max_length=3000)
+    confidence: float = Field(ge=0, le=1)
+    target: str = Field(min_length=1, max_length=1000)
+    instruction: str = Field(min_length=1, max_length=3000)
+    expected_metric: str = Field(min_length=1)
+    expected_direction: Literal["increase", "decrease"]
+    minimum_expected_delta: float | None = Field(default=None, ge=0, le=1)
+
+
 class EditIntent(Contract):
     primary_goal: str = Field(min_length=1, max_length=1000)
     requested_changes: list[str] = Field(default_factory=list, max_length=20)
     preserve: list[str] = Field(default_factory=list, max_length=40)
     reasoning_evidence_ids: list[str] = Field(default_factory=list, max_length=40)
     expected_outcome: str = Field(default="", max_length=1500)
+    optimization: OptimizationHypothesis | None = None
 
 
 class CandidatePlan(Contract):
@@ -141,7 +174,11 @@ class CandidatePlan(Contract):
     strategy: str = Field(min_length=1, max_length=160)
     edit_intent: EditIntent
     seed: int | None = None
-    parameters: dict[str, Any] = Field(default_factory=dict)
+    parameters: dict[str, Any] = Field(default_factory=dict, json_schema_extra={
+        "type": "object", "additionalProperties": False,
+        "properties": {"guidance_scale": {"type": "number", "minimum": 0, "maximum": 30},
+                       "num_inference_steps": {"type": "integer", "minimum": 1, "maximum": 100},
+                       "strength": {"type": "number", "minimum": 0, "maximum": 1}}})
 
     @field_validator("parameters")
     @classmethod
@@ -163,6 +200,14 @@ class PlanResult(Contract):
     candidates: list[CandidatePlan] = Field(min_length=1, max_length=9)
     model: str = Field(min_length=1)
     usage: dict[str, int] = Field(default_factory=dict)
+
+
+class PlanReview(Contract):
+    plan_hash: str = Field(min_length=64, max_length=64)
+    choice: Literal["APPROVE", "REJECT"]
+    confidence: float = Field(ge=0, le=1)
+    model: str = Field(min_length=1)
+    raw_response: dict[str, Any]
 
 
 class ModelProvenance(Contract):
@@ -243,6 +288,7 @@ class WorkerHello(Contract):
 class LeaseRequest(Contract):
     worker_id: str
     lease_token: str = Field(min_length=20)
+    progress: dict[str, Any] = Field(default_factory=dict)
 
 
 class CompleteJob(LeaseRequest):

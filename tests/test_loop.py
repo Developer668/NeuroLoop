@@ -42,6 +42,24 @@ def begin(engine, **kwargs):
 def complete(engine,job,result):
     return engine.complete(job['id'],CompleteJob(worker_id='test-worker',lease_token=job['lease_token'],result=result))
 
+def review_for(payload, choice="APPROVE"):
+    return {"plan_hash":digest(payload["plan"]), "choice":choice, "confidence":.95, "model":"TEST_ONLY",
+        "raw_response":{"model":"TEST_ONLY", "answers":{"plan_gate":{"type":"choice","choice":choice,"confidence":.95,
+        "probabilities":{"APPROVE":1.0 if choice=="APPROVE" else 0.0,"REJECT":0.0 if choice=="APPROVE" else 1.0}}}}}
+
+
+def optimization_for(evaluations):
+    e=next(e for e in evaluations if e["evaluator"]=="vision")
+    return {"observation":{"evaluation_id":e["id"],"response_metric":"creative_quality","value":e["result"]["scores"]["creative_quality"]["value"]},
+        "creative_evidence":{"evaluation_id":e["id"],"description":"TEST_ONLY"},"explanation":"Test hypothesis", "confidence":.8,
+        "target":"layout","instruction":"Reduce clutter","expected_metric":"creative_quality","expected_direction":"increase"}
+
+
+def approve_pending(engine):
+    j=engine.claim('test-worker'); assert j['kind']=='REVIEW_PLAN'
+    complete(engine,j,review_for(j['payload']))
+
+
 def plan_for(job):
     plans=[]
     for slot in job['payload']['candidate_slots']:
@@ -50,7 +68,7 @@ def plan_for(job):
             p=next(x for x in job['payload']['parents'] if x['creative']['id']==parent)
             evidence=[x['id'] for x in p['evidence']['evaluations']]
         plans.append({'parent_creative_id':parent,'prompt':'Test-only model contract','strategy':'TEST_ONLY','edit_intent':{
-            'primary_goal':'test lineage','preserve':['product_identity'],'reasoning_evidence_ids':evidence}})
+            'primary_goal':'test lineage','preserve':['product_identity'],'reasoning_evidence_ids':evidence,'optimization':optimization_for(p['evidence']['evaluations']) if parent else None}})
     return {'summary':'Synthetic response only in tests','model':'TEST_ONLY','candidates':plans}
 
 def generated(engine,job,tmp_path,shade=50):
@@ -69,6 +87,7 @@ def advance_to_decision(engine,tmp_path):
         j=engine.claim('test-worker'); assert j is not None
         if j['kind']=='DECIDE': return j
         if j['kind']=='PLAN': complete(engine,j,plan_for(j))
+        elif j['kind']=='REVIEW_PLAN': complete(engine,j,review_for(j['payload']))
         elif j['kind']=='GENERATE': complete(engine,j,generated(engine,j,tmp_path,30+count))
         elif j['kind']=='EVALUATE': complete(engine,j,evaluated(j,.45+count*.01))
         count+=1
@@ -115,6 +134,7 @@ def test_idempotency_and_cross_campaign_references(engine,tmp_path):
 def test_generation_lease_loss_is_uncertain_not_autoretried(engine,tmp_path):
     c,r=begin(engine)
     p=engine.claim('test-worker'); complete(engine,p,plan_for(p))
+    approve_pending(engine)
     j=engine.claim('test-worker')
     with engine.store.transaction() as s: s.get(Job,j['id']).lease_until=0
     engine.recover_expired(); snap=engine.snapshot(r['id'])
@@ -136,6 +156,7 @@ def test_completed_response_immutable_and_replayed(engine):
     complete(engine,j,p); complete(engine,j,p)
     p['summary']='changed'
     with pytest.raises(DomainError): complete(engine,j,p)
+    approve_pending(engine)
     assert len(engine.snapshot(r['id'])['creatives'])==2
 
 def test_low_confidence_stops_before_regeneration(engine,tmp_path):
@@ -157,6 +178,7 @@ def test_dollar_ceiling_and_missing_price_fail_closed(engine):
 
 def test_evaluator_failure_does_not_deadlock(engine,tmp_path):
     c,r=begin(engine); j=engine.claim('test-worker'); complete(engine,j,plan_for(j))
+    approve_pending(engine)
     for _ in range(2):
         j=engine.claim('test-worker'); complete(engine,j,generated(engine,j,tmp_path))
     for _ in range(2):
@@ -167,6 +189,7 @@ def test_evaluator_failure_does_not_deadlock(engine,tmp_path):
 
 def test_mixed_checkpoint_comparison_rejected(engine,tmp_path):
     c,r=begin(engine); j=engine.claim('test-worker'); complete(engine,j,plan_for(j))
+    approve_pending(engine)
     for _ in range(2):
         j=engine.claim('test-worker'); complete(engine,j,generated(engine,j,tmp_path))
     for i in range(2):

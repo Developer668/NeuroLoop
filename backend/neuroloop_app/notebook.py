@@ -50,6 +50,7 @@ class GenerationContext:
     output_dir: Path
     cancelled: Callable[[], bool]
     remaining_gpu_seconds: float
+    conditioning: str = "media"
 
     def check_cancelled(self):
         if self.cancelled():
@@ -94,6 +95,7 @@ class RegisteredModel:
     activate: Callable[[], None] | None = None
     cost_ceiling_usd: float | None = None
     callable: Callable | None = None
+    supports_media_references: bool = True
 
 
 class ModelRegistry:
@@ -109,10 +111,11 @@ class ModelRegistry:
 
     def register_generator(self, kind: Literal["video", "image"], *, provenance: ModelProvenance,
                            loader: Callable[[], Callable[[GenerationContext], GeneratedFile]],
-                           supports_regeneration=True, park=None, activate=None, cost_ceiling_usd=None):
+                           supports_regeneration=True, park=None, activate=None, cost_ceiling_usd=None, supports_media_references=True):
         if kind not in {"video", "image"}:
             raise ValueError("Generator kind must be video or image")
         self.models[f"generate_{kind}"] = RegisteredModel(provenance, loader, supports_regeneration, park, activate, cost_ceiling_usd)
+        self.models[f"generate_{kind}"].supports_media_references = supports_media_references
 
     def register_evaluator(self, name: Literal["vision", "tsam", "tribe"], *, provenance: ModelProvenance,
                            loader: Callable[[], Callable[[EvaluationContext], EvaluationOutput]],
@@ -129,6 +132,7 @@ class ModelRegistry:
                             "detail": "Real callable registered; execution still requires a successful job" if registered else "Register the actual model in this notebook"}
             if registered:
                 result[name].update(provenance=registered.provenance.model_dump(), supports_regeneration=registered.supports_regeneration,
+                                    supports_media_references=registered.supports_media_references,
                                     cost_ceiling_usd=registered.cost_ceiling_usd, loaded=registered.callable is not None)
         return result
 
@@ -137,7 +141,7 @@ class ModelRegistry:
             entry = self.models.get(capability)
             if entry is None:
                 raise ProviderFailure("NOT_CONFIGURED", f"No actual model registered for {capability}")
-            if isinstance(context, GenerationContext) and context.current_media and not entry.supports_regeneration:
+            if isinstance(context, GenerationContext) and context.current_media and context.conditioning != "text_alternative" and not entry.supports_regeneration:
                 raise ProviderFailure("UNAVAILABLE", "This model adapter does not support current-media regeneration")
             if self.active and self.active != capability:
                 old = self.models[self.active]
@@ -154,6 +158,14 @@ class ModelRegistry:
             output = entry.callable(context)
             context.check_cancelled()
             return output, entry.provenance
+
+    def park_all(self):
+        """Release owned model memory after stop/idle, serialized with inference."""
+        with self.lock:
+            for entry in self.models.values():
+                if entry.callable is not None and entry.park:
+                    entry.park()
+            self.active = None
 
 
 def write_cortical_artifact(path: Path, values, times):
@@ -313,7 +325,10 @@ class NotebookWorker:
                         cancelled.set()
                         break
                     try:
-                        state = self._post(f"/api/v2/jobs/{job['id']}/heartbeat", self._lease(job))
+                        state = self._post(f"/api/v2/jobs/{job['id']}/heartbeat", {**self._lease(job), "progress": {
+                            "message": f"{job['capability']} executing in notebook; elapsed {int(time.monotonic() - started)}s",
+                            "elapsed_seconds": round(time.monotonic() - started, 1), "phase": job["kind"],
+                        }})
                         failures = 0
                         if state.get("cancelled"):
                             cancelled.set()
@@ -339,7 +354,7 @@ class NotebookWorker:
                         os.replace(cached, folder / f"rejected-result-{time.time_ns()}.json")
                     self._post(f"/api/v2/jobs/{job['id']}/fail", {**self._lease(job), "code": "INVALID_OUTPUT",
                         "detail": "Server rejected the typed result; invalid receipt preserved locally",
-                        "safe_to_retry": job["kind"] in {"PLAN", "DECIDE"}})
+                        "safe_to_retry": job["kind"] in {"PLAN", "REVIEW_PLAN", "DECIDE"}})
                     self.last_status = {"state": "INVALID_OUTPUT", "job_id": job["id"]}
                 else:
                     self.last_status = {"state": "UNAVAILABLE", "job_id": job["id"], "detail": "HTTP response requires receipt reconciliation"}
@@ -371,7 +386,21 @@ class NotebookWorker:
     def _execute(self, job, output_dir, cancelled):
         payload = job["payload"]
         if job["kind"] == "PLAN":
-            return self.reasoner.plan(payload).model_dump()
+            from .vision_adapter import VisionAdapter
+            from types import SimpleNamespace
+            vision = VisionAdapter(self.settings.model_copy(update={"vision_model": self.settings.inference_model}))
+            media = []
+            assets = payload.get("references", []) + [p["asset"] for p in payload.get("parents", [])]
+            seen = set()
+            for metadata in assets:
+                if metadata["asset_id"] in seen:
+                    continue
+                seen.add(metadata["asset_id"])
+                if metadata["kind"] in {"image", "video"}:
+                    media.extend(vision.media_content(self._download(metadata), SimpleNamespace(check_cancelled=lambda: self._check_plan_cancelled(cancelled)), count=6))
+            return self.reasoner.plan(payload, media_content=media).model_dump()
+        if job["kind"] == "REVIEW_PLAN":
+            return self.kernel.review_plan(payload).model_dump()
         if job["kind"] == "DECIDE":
             return self.kernel.decide(payload).model_dump()
         refs = [self._download(a) for a in payload.get("references", [])]
@@ -381,7 +410,7 @@ class NotebookWorker:
             if payload["plan"]["parent_creative_id"] and current is None:
                 raise ProviderFailure("INVALID_OUTPUT", "Regeneration requires the actual parent media")
             context = GenerationContext(job["id"], payload["creative_id"], payload["campaign"], payload["plan"]["prompt"],
-                        payload["plan"]["edit_intent"], payload["plan"]["parameters"], refs, current, output_dir, cancelled, job["remaining_gpu_seconds"])
+                        payload["plan"]["edit_intent"], {**payload["plan"]["parameters"], "seed": payload["plan"].get("seed") if payload["plan"].get("seed") is not None else 11}, refs, current, output_dir, cancelled, job["remaining_gpu_seconds"], conditioning=payload.get("conditioning", "media"))
             journal = output_dir.parent / "generated.json"
             if journal.exists():
                 old = json.loads(journal.read_text())
@@ -411,9 +440,15 @@ class NotebookWorker:
             if result.provenance != provenance:
                 raise ProviderFailure("INVALID_OUTPUT", "Returned evaluator provenance differs from the registered checkpoint/configuration")
             artifacts = [self._upload(job, p, f"evaluation-{i}", output_dir) for i, p in enumerate(output.artifacts)]
-            result = result.model_copy(update={"artifact_ids": artifacts, "gpu_seconds": time.monotonic() - started})
+            result = result.model_copy(update={"artifact_ids": artifacts,
+                "gpu_seconds": 0 if payload["evaluator"] == "vision" else time.monotonic() - started})
             return result.model_dump()
         raise ProviderFailure("UNAVAILABLE", "Unsupported job type")
+
+    @staticmethod
+    def _check_plan_cancelled(cancelled):
+        if cancelled():
+            raise ModelCancelled("Planning cancellation requested")
 
     def start(self):
         if self.thread and self.thread.is_alive():
@@ -422,14 +457,26 @@ class NotebookWorker:
             raise RuntimeError("Confirm that this workload is permitted by molab/hackathon staff before starting")
         self.stop_event.clear()
         def loop():
+            idle_since = time.monotonic()
             while not self.stop_event.is_set():
                 try:
                     worked = self.run_once()
+                    if worked:
+                        idle_since = time.monotonic()
                     if not worked:
+                        if time.monotonic() - idle_since >= self.settings.worker_idle_seconds:
+                            self.stop_event.set()
+                            self.last_status = {"state": "IDLE_STOPPED", "detail": "Idle timeout reached; model memory released. Stop the host session to stop provider billing."}
+                            break
                         self.stop_event.wait(3)
                 except Exception as exc:
                     self.last_status = {"state": "UNAVAILABLE", "detail": type(exc).__name__ + ": worker stopped accepting work until connection/configuration recovers"}
+                    if time.monotonic() - idle_since >= self.settings.worker_idle_seconds:
+                        self.stop_event.set()
+                        self.last_status = {"state": "IDLE_STOPPED", "detail": "Connection unavailable through the idle timeout; release host compute when finished."}
+                        break
                     self.stop_event.wait(10)
+            self.registry.park_all()
         self.thread = threading.Thread(target=loop, daemon=True, name="neuroloop-notebook")
         self.thread.start()
         return {"state": "STARTING"}

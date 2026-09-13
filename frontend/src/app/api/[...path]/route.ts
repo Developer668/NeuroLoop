@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { sameOrigin } from "@/lib/request-origin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 const backend = process.env.NEUROLOOP_INTERNAL_API || "http://127.0.0.1:8010";
@@ -7,11 +8,9 @@ async function proxy(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> },
 ) {
-  const origin = request.headers.get("origin");
   if (
     !["GET", "HEAD"].includes(request.method) &&
-    origin &&
-    origin !== request.nextUrl.origin
+    !sameOrigin(request)
   )
     return NextResponse.json(
       { detail: "Cross-origin writes are not permitted" },

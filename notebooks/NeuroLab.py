@@ -20,8 +20,9 @@ def _():
     from neuroloop_app.config import Settings
     from neuroloop_app.notebook import ModelRegistry, NotebookWorker, GeneratedFile, EvaluationOutput, write_cortical_artifact
     from neuroloop_app.domain import ModelProvenance, EvaluationResult, Score, ConstraintResult
+    from neuroloop_app.model_adapters import configure_models
 
-    return ModelRegistry, NotebookWorker, Settings, httpx, mo, os
+    return ModelRegistry, NotebookWorker, Settings, configure_models, httpx, mo, os
 
 
 @app.cell
@@ -35,41 +36,26 @@ def _(mo):
     W&B reasoning and TypeSafe calls**. Configure secrets through your notebook
     provider's secret store, never in a public cell or repository.
 
-    Register your actual loaded model callables in the next cell. Missing models
-    remain `NOT_CONFIGURED`; no test examples are substituted. Confirm provider
+    The built-in adapters connect MiniMax H3 FP8, Ideogram 4 FP8, W&B vision,
+    and the preserved TSAM/TRIBE evaluators. Enable them through the settings
+    in `docs/SELF_HOSTED_NOTEBOOK.md`. Missing models remain `NOT_CONFIGURED`.
+    Confirm provider
     permission before using hosted notebook compute for this workload.
     """)
     return
 
 
 @app.cell
-def _(ModelRegistry):
-    registry = ModelRegistry()
-    # ADD YOUR REAL MODEL SETUP HERE, in this same notebook.
-    # A loader returns a callable: GenerationContext -> GeneratedFile,
-    # or EvaluationContext -> EvaluationOutput. See docs/NOTEBOOK_INTEGRATION.md.
-    # Registration does not invoke the loader; models load on their first job.
-    #
-    # registry.register_generator("video", provenance=your_h3_provenance,
-    #     loader=lambda: your_video_callable, supports_regeneration=True,
-    #     park=offload_video, activate=activate_video)
-    # registry.register_generator("image", provenance=your_image_provenance,
-    #     loader=lambda: your_image_callable, supports_regeneration=True,
-    #     park=offload_image, activate=activate_image)
-    # registry.register_evaluator("vision", provenance=your_vision_provenance,
-    #     loader=lambda: your_real_vision_evaluator)
-    # registry.register_evaluator("tsam", provenance=your_tsam_provenance,
-    #     loader=lambda: your_real_tsam_evaluator)
-    # registry.register_evaluator("tribe", provenance=your_tribe_provenance,
-    #     loader=lambda: your_real_tribe_evaluator)
-    return (registry,)
+def _(ModelRegistry, Settings, configure_models):
+    notebook_settings = Settings()
+    registry = configure_models(ModelRegistry(), notebook_settings)
+    return notebook_settings, registry
 
 
 @app.cell
-def _(NotebookWorker, Settings, registry):
-    notebook_settings = Settings()
+def _(NotebookWorker, notebook_settings, registry):
     worker = NotebookWorker(registry, notebook_settings, worker_id="neurolab-shared")
-    return notebook_settings, worker
+    return (worker,)
 
 
 @app.cell

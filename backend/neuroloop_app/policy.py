@@ -15,6 +15,15 @@ original references. A stochastic regeneration can change multiple properties;
 call its attribution variant_level, never an isolated causal treatment.
 Every child needs an explicit EditIntent: goal, requested changes, all locked
 requirements in preserve, existing parent evidence IDs, and expected outcome.
+Every child EditIntent must include optimization: an observation citing an actual
+parent evaluation ID, response_metric and its exact recorded score value; visual
+creative_evidence citing a parent vision evaluation; a concise hypothesis with
+confidence; a target and executable creative instruction; and expected_metric,
+expected_direction, and optional minimum_expected_delta. Aggregate response scores
+have null time_range. Never manufacture a temporal drop from an aggregate score.
+Timestamped frames establish visible content only, not time-local neural response.
+These are testable public hypotheses, not established causes. TypeSafe reviews
+the exact proposed plan before generation is permitted.
 Never invent product claims or source evidence. Never output executable code,
 file paths, network URLs, tool names or shell commands as generation parameters.
 

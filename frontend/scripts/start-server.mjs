@@ -2,9 +2,12 @@
 import {existsSync,cpSync,mkdirSync} from 'node:fs';
 import {resolve,dirname} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
+import {loadEnvFile} from 'node:process';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const standalone=resolve(root,'.next/standalone');
 if(!existsSync(resolve(standalone,'server.js')))throw new Error('Production build is missing. Run npm run build first.');
+const localEnv=resolve(root,'.env.local');
+if(existsSync(localEnv))loadEnvFile(localEnv);
 mkdirSync(resolve(standalone,'.next'),{recursive:true});
 cpSync(resolve(root,'.next/static'),resolve(standalone,'.next/static'),{recursive:true});
 if(existsSync(resolve(root,'public')))cpSync(resolve(root,'public'),resolve(standalone,'public'),{recursive:true});

@@ -1,7 +1,7 @@
 # Explicit limitations
 
 ## Unverified external execution
-Actual H3/image/vision/TSAM/TRIBE wrappers and weights are supplied in the shared notebook; new-project model execution is unverified. No local GPU inference is run because V1 records a crash hold. Same-notebook placement does not establish GPU memory fit. No W&B/TypeSafe/Meta secret was copied from V1 or invented, and no live sponsor receipt is claimed.
+Actual H3/image/vision adapters are wired into the shared molab notebook; TRIBE/T-SAM checkpoints remain missing there and full-loop GPU execution is unverified. No local GPU inference is run because V1 records a crash hold. Same-notebook placement does not establish GPU memory fit. No W&B/TypeSafe/Meta secret was copied from V1 or invented, and live GLM vision/planning, TypeSafe exact-plan review, and Weave readback receipts are recorded in [the architecture audit](AGENT_ARCHITECTURE_AUDIT.md).
 
 ## Scientific/commercial interpretation
 TSAM and TRIBE are proxies, not direct viewer measurements. Stochastic regeneration changes multiple features, so comparisons are variant-level. Meta reports may be delayed/empty/confounded; statistical experiment winners, attribution calibration and proven commercial improvement are not implemented. Review research/model/media licenses before advertising use.

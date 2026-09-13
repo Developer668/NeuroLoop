@@ -27,6 +27,21 @@ def engine(settings):
     s=Store(settings);s.initialize();return LoopEngine(s,ObjectStore(settings))
 
 
+def test_research_bundle_requires_worker_and_supports_resume(settings, tmp_path):
+    bundle = tmp_path / 'runtime.zip'
+    bundle.write_bytes(b'0123456789')
+    settings.research_bundle_path = bundle
+    with TestClient(create_app(settings)) as client:
+        url = '/api/v2/workers/research-bundle'
+        assert client.get(url).status_code == 401
+        assert client.get(url, headers={'Authorization': 'Bearer ' + 'a'*40}).status_code == 403
+        response = client.get(url, headers={'Authorization': 'Bearer ' + 'w'*40, 'Range': 'bytes=5-'})
+        assert response.status_code == 206
+        assert response.content == b'56789'
+        settings.research_bundle_path = None
+        assert client.get(url, headers={'Authorization': 'Bearer ' + 'w'*40}).status_code == 404
+
+
 def approved(engine,tmp_path):
     from PIL import Image
     c,r=begin(engine);p=tmp_path/'TEST_ONLY.png';Image.new('RGB',(64,64)).save(p)

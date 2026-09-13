@@ -112,6 +112,32 @@ class Evaluation(Base):
     created_at: Mapped[float] = mapped_column(Float, default=now)
 
 
+class ArtifactBackup(Base):
+    __tablename__ = "artifact_backups"
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(30), default="PENDING")
+    url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    next_attempt: Mapped[float] = mapped_column(Float, default=0)
+    updated_at: Mapped[float] = mapped_column(Float, default=now)
+
+
+class NotebookEvidence(Base):
+    """Imported, immutable notebook evidence; never grants campaign eligibility."""
+    __tablename__ = "notebook_evidence"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id"), index=True)
+    input_asset_id: Mapped[str] = mapped_column(ForeignKey("creative_assets.id"), index=True)
+    source_receipt: Mapped[str] = mapped_column(String(300), unique=True)
+    source_kind: Mapped[str] = mapped_column(String(40))
+    title: Mapped[str] = mapped_column(String(250))
+    evaluator: Mapped[str] = mapped_column(String(40))
+    comparison_key: Mapped[str] = mapped_column(String(64))
+    result: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[float] = mapped_column(Float, default=now)
+
+
 class Decision(Base):
     __tablename__ = "decisions"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

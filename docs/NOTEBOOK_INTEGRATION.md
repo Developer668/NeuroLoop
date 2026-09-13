@@ -1,5 +1,7 @@
 # Connect all models in the same notebook
 
+Built-in lazy adapters are now configured in NeuroLab. See [self-hosted setup](SELF_HOSTED_NOTEBOOK.md) for the FP8 generators, vision, preserved research evaluators, supported inputs and current verification limits. The custom-callable contracts below remain available for additional models.
+
 Install the package in the notebook environment, not the old V1 app runtime. `notebooks/NeuroLab.py` is the shared execution and research entry point. Merely opening it does not download or invoke a model.
 
 ## Required secrets/settings

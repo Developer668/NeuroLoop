@@ -1,0 +1,9 @@
+# Install only in the self-hosted GPU environment, after its CUDA PyTorch build.
+# Versions used by the earlier successful H3 / Ideogram media studio.
+diffusers==0.40.0
+transformers==5.14.1
+torchao==0.17.0
+accelerate==1.15.0
+av==18.1.0
+imageio-ffmpeg
+ideogram-4 @ git+https://github.com/ideogram-oss/ideogram4.git@990fe1c4e950bb9e9dc90e01c0ad98ba434f83c2
