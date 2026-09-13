@@ -158,7 +158,7 @@ export default function EvidenceStudio({ campaignId = "" }: { campaignId?: strin
     : receipts.find(
         (r) =>
           r.evaluator === "tribe" &&
-          r.source_kind === "generated_ad_evaluation",
+          r.result.status === "SUCCEEDED",
       )?.input_asset_id ||
       media[0]?.id ||
       "";
@@ -413,12 +413,21 @@ export default function EvidenceStudio({ campaignId = "" }: { campaignId?: strin
                     value={frameIndex}
                     onChange={(e) => seek(Number(e.target.value))}
                   />
-                  {asset.kind !== "video" && (
+                  {(
                     <button
                       className="nl-button"
-                      onClick={() => setPlaying(!playing)}
+                      onClick={async () => {
+                        if (video.current) {
+                          if (playing) video.current.pause();
+                          else {
+                            if (video.current.ended) video.current.currentTime = 0;
+                            try { await video.current.play(); }
+                            catch { setError("Playback was blocked. Press play on the video to start the stored brain response."); }
+                          }
+                        } else setPlaying(!playing);
+                      }}
                     >
-                      {playing ? "Pause" : "Play response"}
+                      {playing ? "Pause response" : "Play video + brain response"}
                     </button>
                   )}
                   <p>

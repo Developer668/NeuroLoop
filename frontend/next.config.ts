@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 const config: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
-  output: "standalone",
+  output: process.env.VERCEL ? undefined : "standalone",
   distDir: process.env.NEUROLOOP_BUILD_DIR || ".next",
   async headers() {
     return [
