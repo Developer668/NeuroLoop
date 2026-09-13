@@ -63,6 +63,17 @@ class Settings(BaseSettings):
     tsam_research_license_accepted: bool = False
     meta_access_token: SecretStr = Field(default=SecretStr(""), validation_alias="META_ACCESS_TOKEN")
     meta_graph_version: str = ""
+    meta_app_id: SecretStr = Field(default=SecretStr(""), validation_alias="META_APP_ID")
+    meta_app_secret: SecretStr = Field(default=SecretStr(""), validation_alias="META_APP_SECRET")
+    meta_oauth_redirect_uri: str = ""
+    google_ads_client_id: SecretStr = Field(default=SecretStr(""), validation_alias="GOOGLE_ADS_CLIENT_ID")
+    google_ads_client_secret: SecretStr = Field(default=SecretStr(""), validation_alias="GOOGLE_ADS_CLIENT_SECRET")
+    google_ads_developer_token: SecretStr = Field(default=SecretStr(""), validation_alias="GOOGLE_ADS_DEVELOPER_TOKEN")
+    google_ads_api_version: str = "v25"
+    google_ads_oauth_redirect_uri: str = ""
+    tiktok_app_id: SecretStr = Field(default=SecretStr(""), validation_alias="TIKTOK_APP_ID")
+    tiktok_app_secret: SecretStr = Field(default=SecretStr(""), validation_alias="TIKTOK_APP_SECRET")
+    tiktok_oauth_redirect_uri: str = ""
 
     @model_validator(mode="after")
     def validate_deployment(self):

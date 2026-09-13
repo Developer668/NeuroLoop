@@ -18,7 +18,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import MetaPanel from "@/components/MetaPanel";
+import PublishAdsPanel from "@/components/PublishAdsPanel";
 import LoopShell, { navigation } from "./LoopShell";
 import LoopComposer, { type ComposeRequest } from "./LoopComposer";
 import {
@@ -140,6 +140,7 @@ type Capabilities = {
   weave: { status: string; delivered_traces: number };
   aria: Json;
   meta: Json;
+  publishing?: Record<string, { configured: boolean; connected: boolean; upload_ready: boolean }>;
 };
 const views = [
   "Overview",
@@ -151,7 +152,7 @@ const views = [
   "Lineage",
   "Creative Lab",
   "Brain Lab",
-  "Experiments",
+  "Publish Ads",
   "Learning",
   "Settings",
 ] as const;
@@ -251,8 +252,18 @@ export default function LoopWorkspace() {
   useEffect(() => {
     const restore = () => {
       const query = new URLSearchParams(window.location.search);
-      setCampaignId(query.get("campaign") || "");
-      setRunId(query.get("run") || "");
+      let restoredCampaign = query.get("campaign") || "";
+      let restoredRun = query.get("run") || "";
+      if ((query.get("connected") || query.get("publish_error")) && !restoredCampaign) {
+        try {
+          const prior = new URLSearchParams(sessionStorage.getItem("neuroloop-publish-return") || "");
+          restoredCampaign = prior.get("campaign") || restoredCampaign;
+          restoredRun = prior.get("run") || restoredRun;
+          sessionStorage.removeItem("neuroloop-publish-return");
+        } catch {}
+      }
+      setCampaignId(restoredCampaign);
+      setRunId(restoredRun);
       setNavigationReady(true);
       const name =
         navigation.find((n) => n.id === query.get("view"))?.view ||
@@ -265,6 +276,7 @@ export default function LoopWorkspace() {
       );
       if (query.get("view") === "upload") updateView("Library");
       if (query.get("view") === "connections") updateView("Settings");
+      if (query.get("view") === "advertising") updateView("Publish Ads");
     };
     restore();
     window.addEventListener("popstate", restore);
@@ -296,6 +308,11 @@ export default function LoopWorkspace() {
     void refresh().catch(() => setReady(false));
   }, [refresh]);
   useEffect(() => {
+    if (ready && view === "Publish Ads" && !campaignId && campaigns.length) {
+      setCampaignId(campaigns[0].id);
+    }
+  }, [ready, view, campaignId, campaigns]);
+  useEffect(() => {
     if (!ready || !campaignId) {
       setDetail(null);
       return;
@@ -307,7 +324,17 @@ export default function LoopWorkspace() {
           if (active) setDetail(d);
         })
         .catch((e) => {
-          if (active) setError(errorMessage(e));
+          if (!active) return;
+          const message = errorMessage(e);
+          if (message.toLowerCase().includes("not found")) {
+            setCampaignId("");
+            setRunId("");
+            setSnapshot(null);
+            setSelectedId("");
+            setDetail(null);
+            return;
+          }
+          setError(message);
         });
     void load();
     const t = setInterval(load, 6000);
@@ -756,6 +783,18 @@ export default function LoopWorkspace() {
                 </p>
               </article>
               <article>
+                <span>Publish Ads</span>
+                <strong>Meta · Google · TikTok</strong>
+                <p>
+                  {caps?.publishing
+                    ? Object.entries(caps.publishing)
+                        .map(([name, state]) => `${name}: ${state.connected ? "connected" : state.configured ? "ready" : "not configured"}`)
+                        .join(" · ")
+                    : "Read provider connection status from Publish Ads."}
+                </p>
+                <button className="nl-text-button" onClick={() => setView("Publish Ads")}>Open publishing <ArrowUpRight size={13} /></button>
+              </article>
+              <article>
                 <span>ARIA research</span>
                 <strong>History export + proposal intake</strong>
                 <p>No undocumented ARIA API is called.</p>
@@ -816,8 +855,13 @@ export default function LoopWorkspace() {
             </button>
           </section>
         </>
-      ) : view === "Experiments" ? (
-        <MetaPanel runId={runId} creativeId={selected?.id || ""} />
+      ) : view === "Publish Ads" ? (
+        <PublishAdsPanel
+          assets={detail?.assets || []}
+          campaign={detail?.campaign || null}
+          campaignId={campaignId}
+          preferredAssetId={selected?.output_asset_id}
+        />
       ) : view === "Learning" ? (
         <section className="nl-panel">
           <h2>What the loop has actually learned.</h2>

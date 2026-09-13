@@ -344,3 +344,10 @@ class DeploymentSpec(Contract):
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError("Destination must be an HTTPS URL without credentials")
         return value
+
+
+class AdAssetSyncRequest(Contract):
+    provider: Literal["meta", "google", "tiktok"]
+    asset_id: str
+    account_id: str = Field(min_length=1, max_length=200)
+    label: str = Field(default="NeuroLoop creative", min_length=1, max_length=100)

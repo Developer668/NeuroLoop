@@ -14,17 +14,18 @@ import tempfile
 import time
 from urllib.parse import urlencode
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile, File, Form
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from .config import ROOT, Settings
 from .db import ArtifactBackup, Asset, AuthSession, Creative, Deployment, Evaluation, NotebookEvidence, Job, Run, Store, Trace, Worker, record
-from .domain import (CampaignSpec, CompleteJob, DeploymentSpec, EvaluationResult, ModelProvenance, FailJob, FeedbackRequest,
+from .domain import (AdAssetSyncRequest, CampaignSpec, CompleteJob, DeploymentSpec, EvaluationResult, ModelProvenance, FailJob, FeedbackRequest,
                      LeaseRequest, ResearchProposal, ResumeRequest, StartRun, WorkerHello, digest, now, uid)
 from .engine import DomainError, LoopEngine, required, emit, close_trace
 from .storage import ObjectStore, StorageError, inspect_media
 from .telemetry import WeaveExporter
-from .meta import MetaService, MetaFailure
+from .meta import MetaClient, MetaService, MetaFailure
+from .ad_publish import AdPublishService, AdProviderFailure, PROVIDERS
 
 
 class Login(BaseModel):
@@ -95,7 +96,8 @@ def create_app(settings: Settings | None = None):
     exporter = WeaveExporter(store)
     from .artifact_backup import ArtifactExporter
     artifact_exporter = ArtifactExporter(store, objects, engine)
-    meta = MetaService(store, objects)
+    publishing = AdPublishService(store, objects)
+    meta = MetaService(store, objects, MetaClient(settings, token_provider=lambda: publishing.server_access_token("meta")))
     rate_windows = defaultdict(deque)
 
     @asynccontextmanager
@@ -157,6 +159,10 @@ def create_app(settings: Settings | None = None):
 
     @app.exception_handler(MetaFailure)
     async def meta_failure(request, exc):
+        return JSONResponse({"detail": str(exc), "code": exc.code}, status_code=503)
+
+    @app.exception_handler(AdProviderFailure)
+    async def ad_provider_failure(request, exc):
         return JSONResponse({"detail": str(exc), "code": exc.code}, status_code=503)
 
     @app.exception_handler(StorageError)
@@ -273,7 +279,8 @@ def create_app(settings: Settings | None = None):
                 "storage": settings.storage, "database": "sqlite-development" if store.sqlite else "postgresql",
                 "weave": {"status": "NOT_CONFIGURED" if not(settings.weave_enabled and settings.wandb_project and settings.wandb_api_key.get_secret_value()) else "VERIFIED_DELIVERY" if trace_count else "CONFIGURED_NOT_VERIFIED", "delivered_traces": trace_count},
                 "aria": {"status": "MANUAL_RESEARCH_IMPORT", "detail": "Real history export and typed proposal intake; no undocumented ARIA API is called."},
-                "meta": {"status": "NOT_CONFIGURED" if not settings.meta_access_token.get_secret_value() or not settings.meta_graph_version else "CONFIGURED_NOT_VERIFIED", "activation": "DISABLED"},
+                "meta": {"status": "CONFIGURED_NOT_VERIFIED" if meta.client.configured() else "NOT_CONFIGURED", "activation": "DISABLED"},
+                "publishing": {item["provider"]: {"configured": item["configured"], "connected": item["connected"], "upload_ready": item["upload_ready"]} for item in publishing.statuses()},
                 "model_execution": "NOTEBOOK_ONLY", "scientific_label": "Predicted Average Cortical Response"}
 
     @app.get("/api/v2/campaigns", dependencies=[Depends(operator)])
@@ -598,6 +605,52 @@ def create_app(settings: Settings | None = None):
                         "vertices":int(mask.sum()),"mean":x.mean(axis=1).tolist(),"rms":float(np.sqrt(np.mean(x**2)))})
             return {"atlas":atlas["atlas"],"mesh":"fsaverage5","sha256":hashlib.sha256(raw).hexdigest(),"times":times,
                     "regions":regions,"interpretation":"Anatomical averages of model predictions; no cognitive function or emotion is inferred."}
+
+    @app.get("/api/v2/publish/providers", dependencies=[Depends(human)])
+    def publish_providers():
+        return publishing.statuses()
+
+    @app.post("/api/v2/publish/{provider}/connect", dependencies=[Depends(human)])
+    def publish_connect(provider: str):
+        return publishing.begin_oauth(provider)
+
+    @app.get("/api/v2/publish/oauth/{provider}/callback")
+    def publish_oauth_callback(provider: str, state: str = "", code: str = "", auth_code: str = "", error: str = ""):
+        destination = settings.frontend_origin.rstrip("/") + "/publish/oauth-return"
+        if provider not in PROVIDERS:
+            return RedirectResponse(destination + "?status=error&code=UNKNOWN_PROVIDER", status_code=303)
+        if error:
+            return RedirectResponse(destination + "?status=error&code=AUTH_DENIED&provider=" + provider, status_code=303)
+        authorization_code = code or auth_code
+        if not state or not authorization_code:
+            return RedirectResponse(destination + "?status=error&code=MISSING_CALLBACK_DATA&provider=" + provider, status_code=303)
+        try:
+            publishing.complete_oauth(provider, state, authorization_code)
+            return RedirectResponse(destination + "?status=connected&provider=" + provider, status_code=303)
+        except AdProviderFailure as exc:
+            return RedirectResponse(destination + "?status=error&code=" + exc.code + "&provider=" + provider, status_code=303)
+        except Exception:
+            return RedirectResponse(destination + "?status=error&code=CONNECT_FAILED&provider=" + provider, status_code=303)
+
+    @app.get("/api/v2/publish/{provider}/accounts", dependencies=[Depends(human)])
+    def publish_accounts(provider: str):
+        if provider not in PROVIDERS:
+            raise DomainError("Unknown advertising provider", 404)
+        return publishing.accounts(provider)
+
+    @app.post("/api/v2/publish/{provider}/disconnect", dependencies=[Depends(human)])
+    def publish_disconnect(provider: str):
+        if provider not in PROVIDERS:
+            raise DomainError("Unknown advertising provider", 404)
+        return publishing.disconnect(provider)
+
+    @app.get("/api/v2/publish/receipts", dependencies=[Depends(human)])
+    def publish_receipts(campaign_id: str | None = None):
+        return publishing.publications(campaign_id)
+
+    @app.post("/api/v2/publish/sync", dependencies=[Depends(human)], status_code=201)
+    def publish_sync(body: AdAssetSyncRequest):
+        return publishing.sync_asset(body)
 
     @app.post("/api/v2/experiments", dependencies=[Depends(operator)], status_code=201)
     def experiment_create(body: DeploymentSpec):

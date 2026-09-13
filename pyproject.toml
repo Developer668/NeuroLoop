@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
  "fastapi>=0.115,<1", "uvicorn>=0.32,<1", "pydantic-settings>=2.7,<3",
  "python-multipart>=0.0.22", "SQLAlchemy>=2.0,<3", "httpx>=0.28,<1",
- "python-dotenv>=1,<2", "Pillow>=11", "alembic>=1.14,<2", "filelock>=3.16,<4"
+ "python-dotenv>=1,<2", "Pillow>=11", "alembic>=1.14,<2", "filelock>=3.16,<4", "cryptography>=43,<51"
 ]
 
 [project.optional-dependencies]

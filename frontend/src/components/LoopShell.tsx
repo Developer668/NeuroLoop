@@ -11,6 +11,7 @@ import {
   Images,
   LayoutDashboard,
   LogOut,
+  Megaphone,
   Menu,
   Moon,
   Plug,
@@ -32,7 +33,7 @@ export const navigation = [
   { view: "Lineage", id: "lineage", icon: GitBranch },
   { view: "Neuro AI", id: "neuro", icon: NeuroMark },
   { view: "Learning", id: "research", icon: ChartNoAxesCombined },
-  { view: "Experiments", id: "advertising", icon: ArrowUpRight },
+  { view: "Publish Ads", id: "publish", icon: Megaphone },
   { view: "Settings", id: "settings", icon: Plug },
 ] as const;
 
@@ -103,9 +104,7 @@ export default function LoopShell({
               <Icon size={16} />
               {name === "Command Center"
                 ? "Experiments"
-                : name === "Experiments"
-                  ? "Advertising"
-                  : name === "Settings"
+                : name === "Settings"
                     ? "Connections & settings"
                     : name}
             </a>

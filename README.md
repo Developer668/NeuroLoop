@@ -1,6 +1,6 @@
 # NeuroLoop
 
-A durable, evidence-driven advertising creative loop with a single shared model notebook.
+A durable, evidence-driven advertising creative loop with a single shared model notebook, plus a human-owned Publish Ads handoff for Meta Ads, Google Ads, and TikTok Ads.
 
 ## Current delivery
 The active application is `backend/neuroloop_app` plus the new `/workspace` frontend. Source from NeuroLoopV1 is preserved separately; `backend/neuroloop` is legacy, not the application to launch. The new runtime does not start V1 GPU workers, copy V1 credentials, or download model checkpoints.
@@ -9,7 +9,7 @@ The V1 landing page and workspace design now wrap the current API: campaign over
 
 NeuroLab includes lazy H3 FP8 / Ideogram FP8 adapters, a real-media W&B vision adapter, and isolated bridges to the preserved TSAM/TRIBE implementations. See [self-hosted notebook setup](docs/SELF_HOSTED_NOTEBOOK.md). Model registration is distinct from successful execution. The user-selected runtime is the molab FP8 Media Studio. GLM-5.3-Flash vision/planning, TypeSafe plan approval, and Weave readback have passed live verification; the complete GPU loop is still unverified. See [the architecture audit](docs/AGENT_ARCHITECTURE_AUDIT.md).
 
-Implemented: typed campaigns and source-aware brand constraints, real uploads, immutable artifact storage, bounded regeneration trees, durable job leases, a shared notebook model registry, W&B Inference planning, real TypeSafe structured decisions, multi-fidelity evidence, human feedback, Weave trace outbox/readback, cortical visualization, paused-only Meta deployment/insights, restricted MCP, marimo NeuroLab, migrations and CPU tests.
+Implemented: typed campaigns and source-aware brand constraints, real uploads, immutable artifact storage, bounded regeneration trees, durable job leases, a shared notebook model registry, W&B Inference planning, real TypeSafe structured decisions, multi-fidelity evidence, human feedback, Weave trace outbox/readback, cortical visualization, encrypted human-owned OAuth + creative-library handoff for Meta/Google/TikTok, paused-only Meta deployment/insights, restricted MCP, marimo NeuroLab, migrations and CPU tests. See `docs/PUBLISH_ADS.md`.
 
 **Not established:** successful live H3/image/TSAM/TRIBE execution through the complete new loop, commercial lift, GPU fit/latency, or production deployment. ARIA is an honest history-export/proposal-import workflow; no undocumented ARIA API or autonomous policy activation is invented. See `docs/LIMITATIONS.md` and `docs/VERIFICATION.md`.
 

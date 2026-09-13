@@ -58,13 +58,10 @@ let browser, currentPage;
     TYPESAFE_API_KEY: "",
     META_ACCESS_TOKEN: "",
   };
-  const python =
-    process.env.NEUROLOOP_TEST_PYTHON ||
-    path.join(
-      root,
-      ".venv",
-      process.platform === "win32" ? "Scripts/python.exe" : "bin/python",
-    );
+  const executable = process.platform === "win32" ? "Scripts/python.exe" : "bin/python",
+    defaultPython = path.join(root, ".venv", executable),
+    stagedPython = path.join(root, ".runtimes", "app", executable),
+    python = process.env.NEUROLOOP_TEST_PYTHON || (fs.existsSync(defaultPython) ? defaultPython : stagedPython);
   start(
     python,
     [
@@ -91,8 +88,9 @@ let browser, currentPage;
   );
   const base = `http://127.0.0.1:${webPort}`;
   await waitFor(base);
+  const brave = "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser";
   browser = await chromium.launch({
-    channel: "msedge",
+    ...(fs.existsSync(brave) ? { executablePath: brave } : {}),
     headless: true,
     args: ["--enable-unsafe-swiftshader"],
   });
@@ -165,6 +163,20 @@ let browser, currentPage;
   ).toBeVisible();
   await page.screenshot({
     path: path.join(output, "library.png"),
+    fullPage: true,
+  });
+  await page.getByRole("link", { name: "Publish Ads", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Send a finished creative to your ad libraries." })).toBeVisible();
+  await expect(page.getByText("fixture.png", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Meta Ads", { exact: true })).toBeVisible();
+  await expect(page.getByText("Google Ads", { exact: true })).toBeVisible();
+  await expect(page.getByText("TikTok Ads", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Setup required" })).toHaveCount(3);
+  for (const button of await page.getByRole("button", { name: "Setup required" }).all())
+    await expect(button).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Upload to 0 destinations" })).toBeDisabled();
+  await page.screenshot({
+    path: path.join(output, "publish-ads.png"),
     fullPage: true,
   });
   await page.getByRole("link", { name: "Neuro AI", exact: true }).click();
@@ -251,6 +263,12 @@ let browser, currentPage;
     path: path.join(output, "mobile.png"),
     fullPage: true,
   });
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await page.getByRole("link", { name: "Publish Ads", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Send a finished creative to your ad libraries." })).toBeVisible();
+  if (await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 2))
+    throw Error("Mobile Publish Ads layout overflows");
+  await page.screenshot({ path: path.join(output, "publish-ads-mobile.png"), fullPage: true });
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Open local workspace" }),
@@ -258,7 +276,7 @@ let browser, currentPage;
   await page.screenshot({ path: path.join(output, "login-v1-mobile.png"), fullPage: true });
   if (errors.length) throw Error(JSON.stringify(errors));
   console.log(
-    `PASS: landing, auth/CSRF, campaign creation, mixed upload, library, composer/run queue, refresh recovery, navigation, theme persistence, mobile layout, logout. Screenshots: ${output}`,
+    `PASS: landing, auth/CSRF, campaign creation, mixed upload, library, honest Publish Ads unconfigured state, composer/run queue, refresh recovery, navigation, theme persistence, mobile layout, logout. Screenshots: ${output}`,
   );
 })()
   .catch(async (e) => {
