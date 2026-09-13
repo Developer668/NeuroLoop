@@ -8,6 +8,7 @@ import httpx
 from sqlalchemy import select
 from .db import Store, Trace, record
 from .domain import now, utc
+from .outcome_telemetry import trace_summary
 
 
 class WeaveExporter:
@@ -55,7 +56,7 @@ class WeaveExporter:
                 if data["ended_at"] is not None:
                     self._post("/call/end", {"end": {"project_id": project, "id": data["id"], "trace_id": data["run_id"],
                                "started_at": utc(data["started_at"]), "ended_at": utc(data["ended_at"]),
-                               "exception": data["exception"], "output": data["output"], "summary": {}}})
+                               "exception": data["exception"], "output": data["output"], "summary": trace_summary(data)}})
                 receipt = self._post("/call/read", {"project_id": project, "id": data["id"]}).get("call")
                 if not receipt or receipt.get("id") != data["id"] or receipt.get("trace_id") != data["run_id"] or receipt.get("parent_id") != data["parent_id"]:
                     raise ValueError("Weave readback did not confirm the trace hierarchy")

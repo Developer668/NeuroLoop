@@ -61,6 +61,25 @@ def test_ideogram_rejects_media_before_loading_weights(tmp_path):
     assert adapter.pipe is None
 
 
+def test_ideogram_rejects_prose_before_loading_weights(tmp_path):
+    adapter = IdeogramAdapter(settings(tmp_path))
+    ctx = GenerationContext("j", "c", {}, "A prose brief is not a structured caption", {}, {}, [], None, tmp_path, lambda: False, 120)
+    with pytest.raises(ProviderFailure, match="structured JSON caption"):
+        adapter(ctx)
+    assert adapter.pipe is None
+
+
+def test_ideogram_caption_preserves_reviewed_text_and_layout():
+    from neuroloop_app.ideogram_caption import caption_json
+    caption = {"high_level_description": "An editorial advertisement.",
+               "compositional_deconstruction": {"background": "Cream paper", "elements": [
+                   {"type": "text", "bbox": [100, 100, 300, 900], "text": "Créate", "desc": "Teal headline"}]}}
+    encoded = caption_json(json.dumps(caption))
+    assert json.loads(encoded) == caption
+    assert "Créate" in encoded
+    assert list(json.loads(encoded)["compositional_deconstruction"]["elements"][0]) == ['type', 'bbox', 'text', 'desc']
+
+
 def test_vision_sends_real_image_bytes_and_validates_result(tmp_path):
     path = tmp_path / "fixture.png"
     Image.new("RGB", (64,64), "blue").save(path)
@@ -99,6 +118,11 @@ def test_video_frame_index_maps_to_supplied_time_and_rejects_wrong_index(tmp_pat
     ctx = EvaluationContext('test','test',{},asset,[],[],tmp_path,lambda:False)
     result=adapter(ctx).result
     assert result.observations['frame_evidence'][0]['timestamp_seconds']==5.175*2.5/6
+    body['constraints'] = [{'name':'test','status':'UNKNOWN','evidence':'TEST_ONLY','description':''}]
+    assert adapter(ctx).result.constraints[0].status == 'UNKNOWN'
+    body['constraints'][0]['description'] = 'Substantive extra assertion'
+    with pytest.raises(ProviderFailure): adapter(ctx)
+    body.pop('constraints')
     evidence['frame_index']=6
     with pytest.raises(ProviderFailure): adapter(ctx)
     evidence.update(frame_index=2,timestamp_seconds=0)
@@ -139,11 +163,17 @@ def test_worker_full_two_round_loop_with_text_alternatives(tmp_path):
         c = engine.create_campaign(CampaignSpec(title="TEST_ONLY", brief="Test fixture", brand=BrandSpec(name="Test"), media_kind="image", aspect_ratio="1:1"))
         run = engine.start(c["id"], StartRun(config=RunConfig(initial_candidates=1, beam_width=1, branch_factor=1, max_rounds=2, optional_evaluators=[])), "fixture")
         worker = NotebookWorker(registry, s, client=client, cache_dir=tmp_path / "cache")
-        worker.reasoner = SimpleNamespace(plan=plan)
+        def summarize(evidence, execution):
+            from neuroloop_app.domain import digest
+            return {"summary": "TEST_ONLY", "findings": [], "limitations": [], "next_steps": [],
+                    "evidence_ids": [e["id"] for e in evidence], "provider_receipt": {"model": "TEST_ONLY"},
+                    "input_digest": digest({"evidence": evidence, "execution": execution})}
+        worker.reasoner = SimpleNamespace(plan=plan, summarize=summarize)
         worker.kernel = SimpleNamespace(decide=decide, review_plan=lambda payload: __import__("neuroloop_app.domain", fromlist=["PlanReview"]).PlanReview.model_validate(__import__("test_loop").review_for(payload)))
         for _ in range(12):
             if engine.snapshot(run["id"])["run"]["state"] == "READY_FOR_REVIEW": break
             assert worker.run_once()
+        assert worker.run_once()  # Automatic summary is explanatory; the decision remains paused for human review.
         snapshot = engine.snapshot(run["id"])
         assert snapshot["run"]["state"] == "READY_FOR_REVIEW"
         assert len(snapshot["creatives"]) == 2

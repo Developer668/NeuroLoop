@@ -36,13 +36,13 @@ Return public decision summaries, not hidden chain-of-thought transcripts.
 """
 
 ACTIONS = {
-    "KEEP": "Keep the best valid candidate; further regeneration is not justified.",
-    "REGENERATE": "Evidence supports a bounded reference-conditioned improvement of current candidates.",
-    "GENERATE_ALTERNATIVE": "A different creative strategy is justified while preserving identity and lineage.",
-    "RUN_MORE_EVALUATION": "A single additional evaluation could resolve meaningful uncertainty.",
+    "KEEP": "Retain an eligible candidate and end this search below the configured quality threshold because no specific feasible evidence-backed improvement is justified. Eligibility alone is not a reason to stop. Use READY_FOR_DEPLOYMENT when the objective and quality threshold are met; use a generation action when an observed weakness supports a feasible bounded experiment.",
+    "REGENERATE": "Test a specific improvement grounded in an eligible parent's recorded evaluation, using the current creative as a media reference. The generator must support regeneration and budget must remain. An observed weakness and feasible edit can justify the experiment without proving future score improvement; preserve the parent for comparison and require fresh evaluation of the child.",
+    "GENERATE_ALTERNATIVE": "Test an evidence-backed alternative when a different creative approach is needed, or when the generator supports only text-conditioned generation and cannot edit parent pixels. Preserve identity, requirements and recorded parent evidence lineage. Prefer REGENERATE for a targeted media-conditioned correction when that capability is available; do not claim text-only generation edits the parent image.",
+    "RUN_MORE_EVALUATION": "A specific unresolved question about candidate eligibility or the proposed edit can be resolved by another available evaluator. Do not repeat an unchanged sparse-frame review to answer audio-character, licensing, causal-outcome, or unavailable-model questions.",
     "ASK_HUMAN": "Missing/conflicting evidence, policy ambiguity, or preference requires human review.",
-    "READY_FOR_DEPLOYMENT": "Recommend the valid creative for human review, NOT financial authorization.",
-    "STOP": "No further useful work is justified within this run.",
+    "READY_FOR_DEPLOYMENT": "The requested creative objective and configured quality threshold are met with sufficient evidence; recommend human review, NOT financial authorization.",
+    "STOP": "End the run because remaining budget, run limits or an unavailable execution path prevent useful further work. This does not certify any candidate's quality; use KEEP when retaining an eligible candidate is itself the evidence-backed creative judgment.",
     "REJECT": "No candidate has sufficient trustworthy evidence to keep.",
 }
 STRATEGIES = {

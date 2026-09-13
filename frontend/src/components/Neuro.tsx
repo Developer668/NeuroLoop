@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/types";
 import LoadingState from "@/components/ui/loading-state";
-import { PromptInput } from "@/components/ui/ai-chat-input";
+import { PromptInput } from "@/components/ui/local-command-input";
 
 export function NeuroMark({ size = 20 }: { size?: number }) {
   return (
@@ -181,3 +181,4 @@ export default function Neuro() {
     </section>
   );
 }
+

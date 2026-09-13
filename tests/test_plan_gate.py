@@ -9,6 +9,25 @@ from test_loop import (engine, settings, begin, complete, plan_for, review_for,
 from neuroloop_app.engine import DomainError
 
 
+def test_review_distinguishes_initial_proposal_from_revision(settings):
+    from neuroloop_app.sponsors import TypeSafeKernel
+    settings.typesafe_api_key = SecretStr('test-only')
+    requests = []
+    def respond(request):
+        import json
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json={'model': 'test-model', 'answers': {'plan_gate': {
+            'type': 'choice', 'choice': 'REJECT', 'confidence': .95,
+            'probabilities': {'APPROVE': .025, 'REJECT': .975}}}})
+    kernel = TypeSafeKernel(settings, httpx.Client(transport=httpx.MockTransport(respond)))
+    for parent in (None, 'actual-parent-id'):
+        result = kernel.review_plan({'plan': {'candidates': [{'parent_creative_id': parent}]}})
+        assert result.choice == 'REJECT'  # Stage-specific instructions never override the provider.
+    assert 'INITIAL' in requests[0]['questions']['plan_gate']['instructions']
+    assert 'REVISION' in requests[1]['questions']['plan_gate']['instructions']
+    assert 'actual parent evaluation IDs' in requests[1]['questions']['plan_gate']['instructions']
+
+
 def test_reasoning_exhaustion_reports_token_budget_without_creating_plan(settings):
     settings.wandb_api_key = SecretStr('test-only')
     settings.inference_model = 'zai-org/GLM-5.3-Flash'

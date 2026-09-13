@@ -19,6 +19,9 @@ import {
   X,
 } from "lucide-react";
 import MetaPanel from "@/components/MetaPanel";
+import RunProgress from "./RunProgress";
+import LiveLogPanel from "./LiveLogPanel";
+import liveStyles from "./LiveLogPanel.module.css";
 import LoopShell, { navigation } from "./LoopShell";
 import LoopComposer, { type ComposeRequest } from "./LoopComposer";
 import {
@@ -28,9 +31,13 @@ import {
 } from "./LoopCollections";
 import LoopLogin from "./LoopLogin";
 const EvidenceStudio = dynamic(() => import("./EvidenceStudio"));
+const HelpGuide = dynamic(() => import("./HelpGuide"));
+const TelemetryPanel = dynamic(() => import("./TelemetryPanel"));
+const PublishAdsPanel = dynamic(() => import("./PublishAdsPanel"));
 type Json = Record<string, unknown>;
 export type Asset = {
   id: string;
+  job_id?: string | null;
   name: string;
   mime: string;
   kind: string;
@@ -87,6 +94,9 @@ type Snapshot = {
     id: string;
     kind: string;
     capability: string;
+    started_at?: number | null;
+    completed_at?: number | null;
+    created_at?: number;
     status: string;
     error: Json | null;
     progress: Json;
@@ -151,6 +161,9 @@ const views = [
   "Lineage",
   "Creative Lab",
   "Brain Lab",
+  "Logs & Charts",
+  "Publish Ads",
+  "How to use",
   "Experiments",
   "Learning",
   "Settings",
@@ -189,12 +202,12 @@ function Status({ value }: { value: string }) {
 function Media({ creative, kind }: { creative: Creative; kind?: string }) {
   if (!creative.output_asset_id)
     return (
-      <div className="nl-no-media">
-        <Layers size={24} />
+      <div className="nl-no-media" role="status" aria-busy={!["FAILED", "CANCELLED", "REJECTED"].includes(creative.status)}>
+        {["FAILED", "CANCELLED", "REJECTED"].includes(creative.status) ? <Layers size={24} /> : <span className={liveStyles.waiting}><Loader2 size={24} /></span>}
         <span>
           {creative.status === "FAILED"
             ? "Generation failed — record preserved"
-            : "Awaiting notebook generation"}
+            : ["CANCELLED", "REJECTED"].includes(creative.status) ? "Generation stopped — record preserved" : "Waiting for generated media… Updates appear automatically."}
         </span>
       </div>
     );
@@ -255,6 +268,7 @@ export default function LoopWorkspace() {
       setRunId(query.get("run") || "");
       setNavigationReady(true);
       const name =
+        (query.get("view") === "connections" ? "Settings" : undefined) ||
         navigation.find((n) => n.id === query.get("view"))?.view ||
         (window.location.pathname === "/neuro" ? "Neuro AI" : undefined);
       updateView(
@@ -282,6 +296,7 @@ export default function LoopWorkspace() {
     }
     window.history.replaceState(null, "", url);
   }, [campaignId, runId, navigationReady]);
+  const [runSyncedAt, setRunSyncedAt] = useState<number>();
   const refresh = useCallback(async () => {
     const [cs, cap] = await Promise.all([
       api<Campaign[]>("/campaigns"),
@@ -294,6 +309,8 @@ export default function LoopWorkspace() {
   }, []);
   useEffect(() => {
     void refresh().catch(() => setReady(false));
+    const timer = setInterval(() => { void refresh().catch((e) => setError(errorMessage(e))); }, 10000);
+    return () => clearInterval(timer);
   }, [refresh]);
   useEffect(() => {
     if (!ready || !campaignId) {
@@ -301,10 +318,15 @@ export default function LoopWorkspace() {
       return;
     }
     let active = true;
+    let firstLoad = true;
     const load = () =>
       api<Detail>(`/campaigns/${campaignId}`)
         .then((d) => {
-          if (active) setDetail(d);
+          if (active) {
+            setDetail(d);
+            if (firstLoad) setRunId(previous => previous || d.runs[0]?.id || "");
+            firstLoad = false;
+          }
         })
         .catch((e) => {
           if (active) setError(errorMessage(e));
@@ -322,14 +344,19 @@ export default function LoopWorkspace() {
       return;
     }
     let active = true;
-    const load = () =>
-      api<Snapshot>(`/runs/${runId}`)
-        .then((d) => {
-          if (active) setSnapshot(d);
-        })
-        .catch((e) => {
-          if (active) setError(errorMessage(e));
-        });
+    let loading = false;
+    const load = async () => {
+      if (loading) return;
+      loading = true;
+      try {
+        const d = await api<Snapshot>(`/runs/${runId}`);
+        if (active) { setSnapshot(d); setRunSyncedAt(Date.now()); }
+      } catch (e) {
+        if (active) setError(errorMessage(e));
+      } finally {
+        loading = false;
+      }
+    };
     void load();
     const t = setInterval(load, 2500);
     return () => {
@@ -473,7 +500,7 @@ export default function LoopWorkspace() {
           brand: { name: request.brand },
           media_kind: request.kind,
           aspect_ratio: request.aspect,
-          duration_seconds: 15,
+          duration_seconds: request.duration,
         }),
       });
       chooseCampaign(campaign.id);
@@ -524,6 +551,10 @@ export default function LoopWorkspace() {
   const current = snapshot?.run;
   const activeJob = snapshot?.jobs.find((j) => j.status === "LEASED");
   const planReview = snapshot?.jobs.filter((job) => job.kind === "REVIEW_PLAN" && job.status === "SUCCEEDED").at(-1)?.result;
+  const agentSummary = snapshot?.jobs.filter(job => job.kind === "SUMMARY" && job.status === "SUCCEEDED").at(-1)?.result;
+  const latestDecision = snapshot?.decisions.at(-1);
+  const outputProvenance = selected?.generation.provenance as Json | undefined;
+  const summaryProvider = agentSummary?.provider_receipt as Json | undefined;
   const lowConfidencePlan = current?.stop_reason?.startsWith("TYPESAFE_PLAN") && planReview?.choice === "APPROVE";
   const submitFeedback = (kind: string) =>
     perform(async () => {
@@ -608,6 +639,14 @@ export default function LoopWorkspace() {
         <div className="nl-busy" role="status">
           <Loader2 className="nl-spin" size={15} /> Saving real workspace state…
         </div>
+      )}
+      {!creating && view !== "How to use" && snapshot && snapshot.run.id === runId && (
+        <RunProgress runId={runId} state={snapshot.run.state} stopReason={snapshot.run.stop_reason}
+          jobs={snapshot.jobs} online={!!caps?.workers.some(w => w.online)} updatedAt={runSyncedAt}
+          open={() => setView("Command Center")} />
+      )}
+      {!creating && view !== "How to use" && runId && (!snapshot || snapshot.run.id !== runId) && (
+        <div className="nl-busy" role="status"><Loader2 className="nl-spin" size={15} /> Loading saved run progress…</div>
       )}
       {creating ? (
         <section className="nl-panel">
@@ -702,10 +741,16 @@ export default function LoopWorkspace() {
             </button>
           </form>
         </section>
+      ) : view === "How to use" ? (
+        <HelpGuide />
       ) : view === "Neuro AI" ? (
         <LoopComposer busy={busy} submit={compose} />
       ) : view === "Brain Lab" ? (
-        <EvidenceStudio />
+        <EvidenceStudio key={campaignId} campaignId={campaignId} />
+      ) : view === "Logs & Charts" ? (
+        <TelemetryPanel />
+      ) : view === "Publish Ads" ? (
+        <PublishAdsPanel assets={detail?.assets || []} campaign={detail?.campaign || null} campaignId={campaignId} preferredAssetId={selected?.output_asset_id} />
       ) : view === "Overview" || view === "Projects" ? (
         <CampaignCollection
           campaigns={campaigns}
@@ -875,7 +920,7 @@ export default function LoopWorkspace() {
               <option value="">New run / campaign inputs</option>
               {detail?.runs.map((r) => (
                 <option key={r.id} value={r.id}>
-                  {short(r.id)} · {r.state} · round {r.round}
+                  {short(r.id)} · {r.state} · round {r.round + 1}
                 </option>
               ))}
             </select>
@@ -1008,7 +1053,8 @@ export default function LoopWorkspace() {
                   <div className="nl-metrics">
                     <article>
                       <span>GENERATION ROUND</span>
-                      <strong>{current.round}</strong>
+                      <strong>{current.round + 1}</strong>
+                      <small>Advances when the loop starts another generation.</small>
                     </article>
                     <article>
                       <span>CANDIDATES PRESERVED</span>
@@ -1032,7 +1078,7 @@ export default function LoopWorkspace() {
                       </strong>
                       <span>
                         {lowConfidencePlan
-                          ? `TypeSafe chose APPROVE with confidence ${Number(planReview?.confidence).toFixed(2)}, below this run's required threshold. Generation has not been authorized.`
+                          ? `TypeSafe chose APPROVE with confidence ${Number(planReview?.confidence).toFixed(2)}, below this run's required threshold. ${snapshot?.creatives.some(c => c.output_asset_id) ? "The next generation was not authorized; earlier outputs remain available." : "Generation has not been authorized."}`
                           : "Inspect the evidence and failure history before continuing."}
                       </span>
                     </div>
@@ -1100,7 +1146,7 @@ export default function LoopWorkspace() {
                       new Set(snapshot?.creatives.map((c) => c.round) || []),
                     ).map((round) => (
                       <div className="nl-tree-round" key={round}>
-                        <h3>Round {round}</h3>
+                        <h3>Round {round + 1}</h3>
                         {snapshot?.creatives
                           .filter((c) => c.round === round)
                           .map((c) => (
@@ -1145,7 +1191,7 @@ export default function LoopWorkspace() {
                     >
                       {snapshot?.creatives.map((c) => (
                         <option key={c.id} value={c.id}>
-                          {short(c.id)} · {c.status} · round {c.round}
+                          {short(c.id)} · {c.status} · round {c.round + 1}
                         </option>
                       ))}
                     </select>
@@ -1274,7 +1320,9 @@ export default function LoopWorkspace() {
                       <p>
                         {activeJob
                           ? `Notebook capability: ${activeJob.capability}`
-                          : "The selected candidate appears here after real generation and evaluation."}
+                          : selected?.output_asset_id
+                            ? "Generated output. Evaluation and revision results appear below as they finish."
+                            : "Generated media will appear here as soon as the model saves its output."}
                       </p>
                       {selected ? (
                         <>
@@ -1282,6 +1330,12 @@ export default function LoopWorkspace() {
                             creative={selected}
                             kind={detail?.campaign.spec.media_kind}
                           />
+                          {selected.output_asset_id && <div className="nl-check">
+                            <span>{String(outputProvenance?.model || "Recorded model output")} · Round {selected.round + 1}</span>
+                            <Status value={selected.status} />
+                            <a href={`/api/v2/assets/${selected.output_asset_id}/content`} target="_blank" rel="noreferrer">Open original <ArrowUpRight size={13} /></a>
+                          </div>}
+                          {selected.rejection_reason && <p role="alert">This candidate needs correction: {selected.rejection_reason}</p>}
                           <button
                             className="nl-button"
                             onClick={() => selectCreative(selected.id)}
@@ -1292,9 +1346,11 @@ export default function LoopWorkspace() {
                       ) : (
                         <div className="nl-empty">
                           <BrainCircuit size={34} />
-                          <h3>{activeJob ? "The loop is running." : caps?.workers.some((w) => w.online) ? "Waiting for the next model job." : "The loop is waiting for compute."}</h3>
+                          <h3>{current?.stop_reason ? "No creative was generated in this run." : activeJob ? "The loop is running." : caps?.workers.some((w) => w.online) ? "Waiting for the next model job." : "The loop is waiting for compute."}</h3>
                           <p>
-                            {activeJob
+                            {current?.stop_reason
+                              ? "This run stopped before producing media. The recorded reason and job history explain what needs attention."
+                              : activeJob
                               ? "The current model job is processing. Its output will appear here when it completes."
                               : caps?.workers.some((w) => w.online)
                                 ? "The notebook is connected. Check the live trajectory and job state below for progress or missing model capabilities."
@@ -1302,11 +1358,18 @@ export default function LoopWorkspace() {
                           </p>
                         </div>
                       )}
+                      {!!snapshot?.jobs.filter(j => j.kind === "PLAN" && j.status === "SUCCEEDED").at(-1)?.result?.summary && <details className="nl-evaluator"><summary>Agent’s recorded plan</summary><p>{String(snapshot.jobs.filter(j => j.kind === "PLAN" && j.status === "SUCCEEDED").at(-1)!.result!.summary)}</p></details>}
                     </section>
                     <section className="nl-panel">
                       <h2>Latest decision</h2>
-                      {snapshot?.decisions.length ? (
-                        <JsonView value={snapshot.decisions.at(-1)} />
+                      {agentSummary && <div><h3>Agent’s final response</h3>{summaryProvider?.model ? <p className="nl-note">{String(summaryProvider.model)} · Based on this run’s recorded evidence</p> : null}<p>{String(agentSummary.summary || "")}</p>{Array.isArray(agentSummary.next_steps) && <><h3>Next steps</h3><ul>{agentSummary.next_steps.map((step, index) => <li key={index}>{String(step)}</li>)}</ul></>}</div>}
+                      {latestDecision ? (
+                        <>
+                          <div className="nl-check"><span>Applied decision</span><Status value={latestDecision.applied_action} /></div>
+                          <p>Model recommendation: {String(latestDecision.result.decision || "Not recorded").replaceAll("_", " ").toLowerCase()}{typeof latestDecision.result.confidence === "number" ? ` · confidence ${latestDecision.result.confidence.toFixed(2)}` : ""}.</p>
+                          {latestDecision.override_reason && <p role="status">{latestDecision.override_reason}</p>}
+                          <details className="nl-evaluator"><summary>Inspect full decision receipt</summary><JsonView value={latestDecision} /></details>
+                        </>
                       ) : (
                         <p>
                           The TypeSafe decision will appear after sufficient
@@ -1316,11 +1379,10 @@ export default function LoopWorkspace() {
                     </section>
                   </div>
                   <div>
-                    <section className="nl-panel">
-                      <h2>Live trajectory</h2>
+                    <LiveLogPanel title="Live trajectory" count={snapshot?.events.length ?? 0} updatedAt={runSyncedAt}>
                       <div className="nl-timeline">
                         {snapshot?.events
-                          .slice(-18)
+                          .slice()
                           .reverse()
                           .map((e) => (
                             <article key={e.id}>
@@ -1347,29 +1409,31 @@ export default function LoopWorkspace() {
                             </article>
                           ))}
                       </div>
-                    </section>
-                    <section className="nl-panel">
-                      <h2>Weave traces</h2>
-                      {snapshot?.traces.map((t) => (
-                        <div className="nl-trace" key={t.id}>
+                    </LiveLogPanel>
+                    <LiveLogPanel title="Weave traces" count={snapshot?.traces.length ?? 0} updatedAt={runSyncedAt}>
+                      {snapshot?.traces.slice().reverse().map((t) => (
+                        <details key={t.id}>
+                        <summary className="nl-trace">
                           <span>
+                            <ChevronRight size={13} aria-hidden="true" />{" "}
                             {t.parent_id ? "↳ " : ""}
                             {t.name}
                           </span>
+                          <Status value={t.status} />
+                        </summary>
                           {t.url ? (
                             <a href={t.url} target="_blank" rel="noreferrer">
                               Open <ArrowUpRight size={13} />
                             </a>
-                          ) : (
-                            <Status value={t.status} />
-                          )}
-                        </div>
+                          ) : <p className="nl-note">Waiting for verified upload.</p>}
+                          <JsonView value={t} />
+                        </details>
                       ))}
                       <p className="nl-note">
                         Links appear only after remote readback confirms the
                         trace. Pending local records are not proof of upload.
                       </p>
-                    </section>
+                    </LiveLogPanel>
                   </div>
                 </section>
               )}

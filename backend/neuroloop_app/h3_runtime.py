@@ -267,7 +267,7 @@ def create_runtime():
 
     h3_workflow_pipelines = {}
 
-    def generate_h3(prompt, width=1024, height=672, frames=345, steps=4, seed=11, reference_paths=None, output_dir=None, cancelled=lambda: False):
+    def generate_h3(prompt, width=1344, height=768, frames=124, steps=20, seed=11, reference_paths=None, output_dir=None, cancelled=lambda: False):
         if not prompt.strip() or width % 32 or height % 32:
             raise ValueError('Enter a prompt and dimensions divisible by 32.')
         with h3_lock:
@@ -325,7 +325,7 @@ def create_runtime():
                     memory_hook.remove()
                 inference_seconds = time.monotonic() - inference_started
                 h3_progress['phase'] = 'Encoding MP4'
-                target = Path(output_dir) / f'cat-fp8-{time.time_ns()}.mp4'
+                target = Path(output_dir) / f'h3-fp8-{time.time_ns()}.mp4'
                 encode_video(result['videos'][0], fps=24, output_path=str(target), audio=result['audio'][0], audio_sample_rate=result['sampling_rate'])
                 native_frames = len(result['videos'][0])
                 if frames == 345:

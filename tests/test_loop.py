@@ -81,6 +81,33 @@ def evaluated(job,value=.5,version='fixture-v1',fail=False):
         'scores':{'creative_quality':{'value':value,'source':'TEST_ONLY','meaning':'Synthetic test score, not real evaluation'}},
         'constraints':[{'name':n,'status':'FAIL' if fail else 'PASS','evidence':'TEST_ONLY'} for n in ['product_identity','approved_claims_only','no_prohibited_claims']], 'cost_usd':0}
 
+@pytest.mark.parametrize('delivery,unknown,repairs', [('GENERATED_MEDIA',False,True), ('PROVIDER_REFUSAL',False,False), ('GENERATED_MEDIA',True,False)])
+def test_constraint_repair_preserves_failed_parent_and_review_gate(engine,tmp_path,delivery,unknown,repairs):
+    c,r=begin(engine,max_rounds=2,max_candidates=4)
+    complete(engine,(j:=engine.claim('test-worker')),plan_for(j))
+    approve_pending(engine)
+    for _ in range(2):
+        j=engine.claim('test-worker'); complete(engine,j,generated(engine,j,tmp_path))
+    for _ in range(2):
+        j=engine.claim('test-worker'); result=evaluated(j,fail=True)
+        result['observations']={'media_delivery':delivery}
+        if unknown: result['constraints'][0]['status']='UNKNOWN'
+        complete(engine,j,result)
+    snapshot=engine.snapshot(r['id'])
+    assert all(c['status']=='INVALID' for c in snapshot['creatives'])
+    assert snapshot['run']['champion_id'] is None
+    if not repairs:
+        assert snapshot['run']['state']=='READY_FOR_REVIEW'
+        return
+    j=engine.claim('test-worker')
+    assert j['kind']=='PLAN' and j['payload']['constraint_repair'] is True
+    assert all(not p['evidence']['eligible'] for p in j['payload']['parents'])
+    complete(engine,j,plan_for(j))
+    review=engine.claim('test-worker')
+    assert review['kind']=='REVIEW_PLAN'
+    complete(engine,review,review_for(review['payload'],'REJECT'))
+    assert engine.snapshot(r['id'])['run']['stats']['generation_count']==2
+
 def advance_to_decision(engine,tmp_path):
     count=0
     while count<20:
@@ -96,6 +123,55 @@ def advance_to_decision(engine,tmp_path):
 def decision(job,action='REGENERATE',confidence=.9):
     return {'decision':action,'selected_creative_ids':job['payload']['allowed_creative_ids'][:2],
             'strategy':'TEST_ONLY','confidence':confidence,'reason_codes':['TEST_ONLY'], 'raw_response':{'fixture':True},'model':'TEST_ONLY'}
+
+def test_decision_cannot_offer_ready_below_quality_target(engine,tmp_path):
+    begin(engine,quality_threshold=.99)
+    job=advance_to_decision(engine,tmp_path)
+    assert 'READY_FOR_DEPLOYMENT' not in job['payload']['allowed_actions']
+    with pytest.raises(DomainError,match='unauthorized action'):
+        complete(engine,job,decision(job,'READY_FOR_DEPLOYMENT'))
+
+def test_child_cannot_cite_creative_id_as_evaluation(engine,tmp_path):
+    begin(engine)
+    choose=advance_to_decision(engine,tmp_path)
+    complete(engine,choose,decision(choose))
+    job=engine.claim('test-worker'); plan=plan_for(job)
+    plan['candidates'][0]['edit_intent']['reasoning_evidence_ids'].append(plan['candidates'][0]['parent_creative_id'])
+    with pytest.raises(DomainError,match='not creative or asset IDs'):
+        complete(engine,job,plan)
+    assert not any(j['kind']=='REVIEW_PLAN' and j['payload']['round']==1 for j in engine.snapshot(job['run_id'])['jobs'])
+
+def test_plan_correction_does_not_reroll_valid_rejected_plan(engine):
+    _,run=begin(engine)
+    job=engine.claim('test-worker'); complete(engine,job,plan_for(job))
+    review=engine.claim('test-worker'); complete(engine,review,review_for(review['payload'],'REJECT'))
+    with pytest.raises(DomainError,match='review cannot be bypassed'):
+        engine.correct_invalid_plan(run['id'])
+
+@pytest.mark.parametrize('online', [True, False])
+def test_optional_evaluator_routes_to_separate_online_worker(engine, tmp_path, online):
+    from neuroloop_app.db import Worker
+    _, run = begin(engine)
+    engine.register_worker(WorkerHello(worker_id='research-worker', capabilities={'evaluate_tsam': {'status': 'READY'}}))
+    with engine.store.transaction() as session:
+        row = session.get(Run, run['id'])
+        row.snapshot = {**row.snapshot, 'config': {**row.snapshot['config'], 'optional_evaluators': ['tsam']}}
+        if not online:
+            session.get(Worker, 'research-worker').heartbeat_at = 0
+    for _ in range(10):
+        job = engine.claim('test-worker')
+        if job is None or job['kind'] == 'DECIDE':
+            break
+        if job['kind'] == 'PLAN': complete(engine, job, plan_for(job))
+        elif job['kind'] == 'REVIEW_PLAN': complete(engine, job, review_for(job['payload']))
+        elif job['kind'] == 'GENERATE': complete(engine, job, generated(engine, job, tmp_path))
+        elif job['kind'] == 'EVALUATE': complete(engine, job, evaluated(job))
+    with engine.store.transaction() as session:
+        queued = list(session.scalars(select(Job).where(Job.run_id == run['id'], Job.capability == 'evaluate_tsam')))
+        assert bool(queued) is online
+    if online:
+        assert engine.claim('research-worker')['capability'] == 'evaluate_tsam'
+
 
 def test_real_state_machine_two_rounds_preserves_all_assets(engine,tmp_path):
     c,r=begin(engine,max_rounds=2)
@@ -185,7 +261,8 @@ def test_evaluator_failure_does_not_deadlock(engine,tmp_path):
         j=engine.claim('test-worker'); engine.fail(j['id'],FailJob(worker_id='test-worker',lease_token=j['lease_token'],code='FAILED',detail='fixture failure',gpu_seconds=.5))
     snap=engine.snapshot(r['id']); assert snap['run']['state']=='NEEDS_ATTENTION'
     assert snap['run']['stats']['gpu_seconds']==1
-    engine.resume(r['id']); assert engine.claim('test-worker') is not None
+    assert engine.resume(r['id'])['state'] == 'EVALUATING'
+    assert engine.claim('test-worker') is not None
 
 def test_mixed_checkpoint_comparison_rejected(engine,tmp_path):
     c,r=begin(engine); j=engine.claim('test-worker'); complete(engine,j,plan_for(j))
@@ -250,3 +327,75 @@ def test_path_traversal_rejected(settings):
 
 def test_molab_permission_is_explicit(engine):
     with pytest.raises(DomainError): engine.register_worker(WorkerHello(worker_id='molab',provider='molab',capabilities={}))
+
+
+def test_decision_uses_online_generator_contract_after_split_vision_worker(engine, tmp_path):
+    from neuroloop_app.db import Worker
+    _, run = begin(engine)
+    engine.register_worker(WorkerHello(worker_id='vision-only', capabilities={'evaluate_vision': {'status': 'READY'}}))
+    with engine.store.transaction() as session:
+        generator = session.get(Worker, 'test-worker')
+        generator.capabilities = {k: v for k, v in generator.capabilities.items() if k != 'evaluate_vision'}
+        generator.capabilities = {**generator.capabilities, 'generate_image': {'status': 'READY', 'supports_regeneration': False}}
+    for _ in range(4):
+        job = engine.claim('test-worker')
+        if job['kind'] == 'PLAN': complete(engine, job, plan_for(job))
+        elif job['kind'] == 'REVIEW_PLAN': complete(engine, job, review_for(job['payload']))
+        else: complete(engine, job, generated(engine, job, tmp_path))
+    for _ in range(2):
+        job = engine.claim('vision-only')
+        engine.complete(job['id'], CompleteJob(worker_id='vision-only', lease_token=job['lease_token'], result=evaluated(job)))
+    decision_job = engine.claim('test-worker')
+    assert decision_job['kind'] == 'DECIDE'
+    assert decision_job['payload']['generator_contract']['supports_regeneration'] is False
+    assert 'REGENERATE' not in decision_job['payload']['allowed_actions']
+
+
+def test_stopped_plan_still_gets_an_explanation_without_fabricated_media(engine):
+    _, run = begin(engine)
+    engine.register_worker(WorkerHello(worker_id='summary-worker', capabilities={'summary': {'status': 'READY', 'model': 'TEST_ONLY'}}))
+    job = engine.claim('test-worker')
+    complete(engine, job, plan_for(job))
+    job = engine.claim('test-worker')
+    complete(engine, job, review_for(job['payload'], 'REJECT'))
+    summary = engine.claim('summary-worker')
+    assert summary['kind'] == 'SUMMARY'
+    assert summary['payload']['asset_ids'] == []
+    assert summary['payload']['evidence'] == []
+    assert {j['kind'] for j in summary['payload']['execution']['planning_receipts']} == {'PLAN', 'REVIEW_PLAN'}
+    snapshot = engine.snapshot(run['id'])
+    assert snapshot['run']['stop_reason'] == 'TYPESAFE_PLAN_REJECTED'
+    assert not snapshot['creatives']
+
+
+def test_automatic_summary_preserves_decision_and_validates_citations(engine, tmp_path):
+    from neuroloop_app.db import NotebookEvidence
+    _, run = begin(engine)
+    engine.register_worker(WorkerHello(worker_id='summary-worker', capabilities={'summary': {'status': 'READY', 'model': 'TEST_ONLY'}}))
+    chosen = advance_to_decision(engine, tmp_path)
+    complete(engine, chosen, decision(chosen, action='KEEP'))
+    summary_job = engine.claim('summary-worker')
+    assert summary_job['kind'] == 'SUMMARY'
+    engine.fail(summary_job['id'], FailJob(worker_id='summary-worker', lease_token=summary_job['lease_token'],
+                                         code='INVALID_OUTPUT', detail='Test fixture: invalid citation'))
+    assert engine.snapshot(run['id'])['run']['stop_reason'] == 'KEEP'
+    engine.retry_summary(run['id'])
+    engine.retry_summary(run['id'])  # One delivery job, even after repeated clicks.
+    summary_job = engine.claim('summary-worker')
+    assert summary_job['attempt'] == 2
+    payload = summary_job['payload']
+    result = {'summary': 'Test fixture summary', 'findings': [], 'limitations': [], 'next_steps': [],
+              'evidence_ids': ['invented'], 'provider_receipt': {'model': 'TEST_ONLY'},
+              'input_digest': digest({'evidence': payload['evidence'], 'execution': payload['execution']})}
+    with pytest.raises(DomainError, match='unknown evidence'):
+        engine.complete(summary_job['id'], CompleteJob(worker_id='summary-worker', lease_token=summary_job['lease_token'], result=result))
+    result['evidence_ids'] = [e['id'] for e in payload['evidence']]
+    request = CompleteJob(worker_id='summary-worker', lease_token=summary_job['lease_token'], result=result)
+    engine.complete(summary_job['id'], request)
+    engine.complete(summary_job['id'], request)
+    with engine.store.read() as session:
+        assert len(list(session.scalars(select(NotebookEvidence)))) == 2
+    snap = engine.snapshot(run['id'])
+    assert snap['run']['state'] == 'READY_FOR_REVIEW' and snap['run']['stop_reason'] == 'KEEP'
+    assert next(j for j in snap['jobs'] if j['kind'] == 'SUMMARY')['error'] is None
+    assert engine.claim('summary-worker') is None

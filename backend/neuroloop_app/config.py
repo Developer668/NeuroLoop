@@ -50,10 +50,11 @@ class Settings(BaseSettings):
     provider: str = "local"
     provider_workload_approved: bool = False
     model_long_edge: int = Field(default=1024, ge=512, le=2048)
-    model_steps: int = Field(default=4, ge=4, le=30)
+    model_steps: int = Field(default=20, ge=4, le=30)
     worker_idle_seconds: int = Field(default=300, ge=30, le=3600)
     vision_model: str = ""
     vision_revision: str = "operator-configured-v1"
+    audio_transcription_model_path: Path | None = None
     vision_max_tokens: int = Field(default=32768, ge=1024, le=32768)
     enable_h3: bool = False
     enable_ideogram: bool = False
@@ -63,6 +64,17 @@ class Settings(BaseSettings):
     tsam_research_license_accepted: bool = False
     meta_access_token: SecretStr = Field(default=SecretStr(""), validation_alias="META_ACCESS_TOKEN")
     meta_graph_version: str = ""
+    meta_app_id: SecretStr = Field(default=SecretStr(""), validation_alias="META_APP_ID")
+    meta_app_secret: SecretStr = Field(default=SecretStr(""), validation_alias="META_APP_SECRET")
+    meta_oauth_redirect_uri: str = ""
+    google_ads_client_id: SecretStr = Field(default=SecretStr(""), validation_alias="GOOGLE_ADS_CLIENT_ID")
+    google_ads_client_secret: SecretStr = Field(default=SecretStr(""), validation_alias="GOOGLE_ADS_CLIENT_SECRET")
+    google_ads_developer_token: SecretStr = Field(default=SecretStr(""), validation_alias="GOOGLE_ADS_DEVELOPER_TOKEN")
+    google_ads_api_version: str = "v25"
+    google_ads_oauth_redirect_uri: str = ""
+    tiktok_app_id: SecretStr = Field(default=SecretStr(""), validation_alias="TIKTOK_APP_ID")
+    tiktok_app_secret: SecretStr = Field(default=SecretStr(""), validation_alias="TIKTOK_APP_SECRET")
+    tiktok_oauth_redirect_uri: str = ""
 
     @model_validator(mode="after")
     def validate_deployment(self):

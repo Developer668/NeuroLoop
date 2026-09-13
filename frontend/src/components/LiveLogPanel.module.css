@@ -1,0 +1,11 @@
+.panel { min-width: 0; }
+.header { cursor: pointer; font-weight: 600; padding: 4px 0; }
+.header small { font-size: 12px; font-weight: 400; margin-left: 8px; }
+.sync { display: inline-block; color: var(--text-secondary, #677880); }
+.hint { font-size: 12px; opacity: .7; margin: 12px 0; }
+.viewport { height: clamp(240px, 36vh, 400px); overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding-right: 12px; overflow-wrap: anywhere; }
+.viewport:focus-visible, .header:focus-visible { outline: 2px solid #25988f; outline-offset: 4px; }
+.viewport pre { max-height: 280px; overflow: auto; }
+.waiting { display: inline-flex; animation: turn 1.2s linear infinite; }
+@keyframes turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .waiting { animation: none; } }

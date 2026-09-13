@@ -1,102 +1,44 @@
 .page {
   width: 100%;
   max-width: 980px;
-  min-height: calc(100dvh - 330px);
+  min-height: calc(100dvh - 240px);
 }
-
-.page :global(.neuro-command-intro) h2 {
-  margin: 0 0 7px;
-  font-size: 28px;
-  font-weight: 550;
-  letter-spacing: -.04em;
-}
-
-.page .composer {
-  width: min(100%, 820px);
-  margin: auto auto 0;
-  padding: 22px;
-  border-radius: 24px;
-  background: var(--surface, #fff);
-  border-color: var(--line, #c7d8d3);
-  color: var(--ink, #173540);
-}
-
-.page .composer textarea {
-  min-height: 96px;
-  max-height: 260px;
-  resize: vertical;
-  line-height: 1.75;
-  color: inherit;
-}
-
-.composer .settings {
-  display: grid;
-  grid-template-columns: 1.2fr 1.3fr .7fr;
-  gap: 16px;
-  min-width: 0;
-  margin: 18px 0 0;
-  padding: 18px 0 0;
-  border: 0;
-  border-top: 1px solid var(--line, #dce5e3);
-}
-
-.composer .settings label {
+.page :global(.neuro-command-intro) {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  font-size: 11px;
-  color: var(--muted, #61777f);
+  text-align: center;
+  gap: 18px;
+  margin: 48px auto 30px;
 }
-
-.composer .settings :is(input, select) {
+.page :global(.neuro-command-intro) h2 {
+  margin: 0 0 10px;
+  font-size: 30px;
+  font-weight: 550;
+  letter-spacing: -0.04em;
+}
+.page :global(.neuro-local-label) {
+  margin: 0;
+}
+.composer {
   width: 100%;
-  min-width: 0;
-  min-height: 38px;
-  padding: 8px 10px;
-  border: 1px solid var(--line, #dce5e3);
-  border-radius: 8px;
-  background: var(--surface, #fff);
-  color: var(--ink, #173540);
-  font: inherit;
-  font-size: 12px;
+  margin: 0 auto;
 }
-
-.composer .settings :is(input, select):focus-visible,
-.composer .tools :focus-visible {
-  outline: 2px solid var(--accent, #398783);
-  outline-offset: 3px;
+.page .details {
+  margin: 20px auto auto;
+  max-width: 560px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 11px;
 }
-
-.composer .references:empty { display: none; }
-.composer .references { font-size: 12px; }
-.composer .references button { cursor: pointer; }
-.composer .tools { gap: 12px; margin-top: 20px; }
-.composer .attach { min-height: 38px; cursor: pointer; font-size: 12px; }
-.composer .attach:focus-within { outline: 2px solid var(--accent, #398783); outline-offset: 3px; }
-.composer .send { flex-shrink: 0; width: 40px; height: 40px; border-radius: 12px; }
-.page .details { margin: 16px auto 0; max-width: 720px; text-align: center; color: var(--muted, #61777f); font-size: 11px; }
-.details summary { cursor: pointer; padding: 6px; }
-.spinner { animation: rotate 1s linear infinite; }
-@keyframes rotate { to { transform: rotate(360deg); } }
-
+.details summary {
+  cursor: pointer;
+  padding: 6px;
+}
 @media (max-width: 680px) {
-  .page { min-height: calc(100dvh - 145px); }
+  .page {
+    min-height: calc(100dvh - 145px);
+  }
   .page :global(.neuro-command-intro) {
-    display: grid;
-    grid-template-columns: 64px minmax(0, 1fr);
-    gap: 16px;
-    align-items: center;
+    margin: 30px auto 24px;
   }
-  .page :global(.neuro-local-label) {
-    grid-column: 2;
-    justify-self: start;
-    margin: 0;
-  }
-  .page .composer { margin-top: 36px; padding: 18px; }
-  .composer .settings { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
-  .composer .settings label:first-of-type { grid-column: 1 / -1; }
-  .composer .tools { gap: 8px; }
 }
-
-@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }

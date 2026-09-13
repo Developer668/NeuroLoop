@@ -288,7 +288,7 @@ export function CreativeComparison({
               >
                 {available.map((c) => (
                   <option key={c.id} value={c.id}>
-                    Round {c.round} · {c.plan.strategy} · {c.id.slice(0, 8)}
+                    Round {c.round + 1} · {c.plan.strategy} · {c.id.slice(0, 8)}
                   </option>
                 ))}
               </select>

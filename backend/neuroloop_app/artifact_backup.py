@@ -73,7 +73,9 @@ class ArtifactExporter:
                 metadata={"source_sha256":content_hash,"application":"NeuroLoop","source_kind":asset["kind"] if asset else "receipt"})
             artifact.add_file(str(path), name=path.name)
             with wandb.init(entity=entity, project=project, id=identity.replace("-", ""), resume="allow", job_type="evidence-backup",
-                    settings=wandb.Settings(api_key=settings.wandb_api_key.get_secret_value(), quiet=True, console="off", disable_git=True),
+                    name=f"Backup · {asset['kind'] + ' · ' + asset['name'] if asset else identity.split('-', 1)[0] + ' · ' + identity[-8:]}",
+                    group="artifact-backups", tags=["artifact-backup", "not-a-campaign-run"],
+                    settings=wandb.Settings(api_key=settings.wandb_api_key.get_secret_value(), quiet=True, console="off", disable_git=True, x_disable_stats=True),
                     dir=str(self.store.settings.data_dir)) as run:
                 if asset and asset["kind"] == "image":
                     run.log({"creative":wandb.Image(str(path),caption=asset["name"])})

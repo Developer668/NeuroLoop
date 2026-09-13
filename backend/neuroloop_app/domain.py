@@ -33,6 +33,16 @@ class Contract(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
+class ExecutionSummary(Contract):
+    summary: str = Field(min_length=1, max_length=12000)
+    findings: list[str] = Field(max_length=30)
+    limitations: list[str] = Field(max_length=30)
+    next_steps: list[str] = Field(max_length=20)
+    evidence_ids: list[str] = Field(max_length=100)
+    provider_receipt: dict[str, Any]
+    input_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 class RunState(StrEnum):
     CREATED = "CREATED"
     PLANNING = "PLANNING"
@@ -305,7 +315,7 @@ class FailJob(LeaseRequest):
 
 class FeedbackRequest(Contract):
     creative_id: str
-    kind: Literal["like", "dislike", "prefer", "annotation", "reject", "lock"]
+    kind: Literal["like", "dislike", "prefer", "annotation", "reject", "lock", "accept", "accept_after_edit"]
     text: str = Field(default="", max_length=4000)
 
 
@@ -344,3 +354,10 @@ class DeploymentSpec(Contract):
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError("Destination must be an HTTPS URL without credentials")
         return value
+
+
+class AdAssetSyncRequest(Contract):
+    provider: Literal["meta", "google", "tiktok"]
+    asset_id: str
+    account_id: str = Field(min_length=1, max_length=200)
+    label: str = Field(default="NeuroLoop creative", min_length=1, max_length=100)

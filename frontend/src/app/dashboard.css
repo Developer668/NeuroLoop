@@ -5,10 +5,7 @@
    prefers-reduced-motion (guard at the bottom of this file).
    ------------------------------------------------------------------ */
 .app-shell {
-  background:
-    radial-gradient(1100px 480px at 88% -120px, #e4f2f0 0%, #e4f2f000 62%),
-    radial-gradient(900px 420px at -160px 34%, #eef6f8 0%, #eef6f800 55%),
-    var(--paper);
+  background: var(--paper);
 }
 
 /* Topbar: deeper glass, quieter hairline. */
@@ -30,7 +27,7 @@
   transform: translateX(2px);
 }
 .app-shell .nav-item.active {
-  background: linear-gradient(90deg, #e2f0f2 0%, #eaf5f6 78%, #eaf5f600);
+  background: #e2f0f2;
   color: #0e6874;
 }
 .app-shell .nav-item.active svg {
@@ -71,7 +68,7 @@
   transform: translate(2px, -2px);
 }
 
-/* Stat cards: gradient numerals, accent hairline, lift on hover. */
+/* Stat cards: solid numerals, accent hairline, lift on hover. */
 .app-shell .stat {
   overflow: hidden;
   transition:
@@ -84,7 +81,7 @@
   position: absolute;
   inset: 0 0 auto 0;
   height: 2px;
-  background: linear-gradient(90deg, #168486, #6cc4bf);
+  background: #168486;
   opacity: 0;
   transition: opacity 0.3s;
 }
@@ -97,10 +94,7 @@
   opacity: 1;
 }
 .app-shell .stat strong {
-  background: linear-gradient(120deg, #143c50 15%, #168486 85%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: #143c50;
   font-variant-numeric: tabular-nums;
 }
 .app-shell .stat-label svg {
@@ -147,15 +141,15 @@
   border-color: #d7e4ea;
 }
 
-/* Primary buttons: brand gradient with a shine sweep. */
+/* Primary buttons retain the existing brand palette with solid fills. */
 .app-shell .button.primary {
   position: relative;
   overflow: hidden;
-  background: linear-gradient(135deg, #14404f, #168486);
+  background: #14404f;
   border-color: #14404f;
 }
 .app-shell .button.primary:hover {
-  background: linear-gradient(135deg, #1a4f60, #1a9aa0);
+  background: #1a4f60;
   border-color: #1a4f60;
 }
 .app-shell .button.primary:after {
@@ -165,7 +159,7 @@
   bottom: 0;
   left: -75%;
   width: 45%;
-  background: linear-gradient(100deg, transparent, #ffffff40, transparent);
+  background: transparent;
   transform: skewX(-18deg);
   transition: left 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
@@ -312,7 +306,7 @@
    system blocks with an accent edge. Markup unchanged.
    ------------------------------------------------------------------ */
 .app-shell .connection-code {
-  background: linear-gradient(160deg, #113342 0%, #0f2c3a 100%);
+  background: #113342;
   border-color: #1d4a5c;
   color: #9fbfcb;
 }

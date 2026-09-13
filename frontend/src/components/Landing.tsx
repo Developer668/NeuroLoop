@@ -262,7 +262,7 @@ export default function Landing() {
         <div className="evidence-path-links">
           <Link href="/workspace?view=brain"><span className="evidence-path-number">01</span><div><strong>The response</strong><p>Explore the predicted cortical surface and its timeline in Brain Lab.</p></div><ArrowUpRight size={19} /></Link>
           <Link href="/workspace?view=research"><span className="evidence-path-number">02</span><div><strong>The comparison</strong><p>Inspect saved evaluations, charts and the local research ledger.</p></div><ArrowUpRight size={19} /></Link>
-          <Link href="/workspace?view=connections"><span className="evidence-path-number">03</span><div><strong>The execution</strong><p>Review integration status and connect your agent to the same services.</p></div><ArrowUpRight size={19} /></Link>
+          <Link href="/workspace?view=telemetry"><span className="evidence-path-number">03</span><div><strong>The execution</strong><p>Follow model calls, saved logs and verified trace links.</p></div><ArrowUpRight size={19} /></Link>
         </div>
       </section>
       <section className="agent-section" id="for-agents">
@@ -280,7 +280,7 @@ export default function Landing() {
             it a goal and a budget. Get back a creative, the evidence, and a
             reason to stop.
           </p>
-          <Link href="/workspace?view=connections" className="button">
+          <Link href="/workspace?view=settings" className="button">
             Connect with MCP
             <ArrowUpRight size={16} />
           </Link>
@@ -296,10 +296,10 @@ export default function Landing() {
             <small>DISCOVER</small>
             <code><span className="syntax-function">get_capabilities</span><span className="syntax-punctuation">(</span><span className="syntax-argument"></span><span className="syntax-punctuation">)</span></code>
             <small>EXPERIMENT</small>
-            <code><span className="syntax-function">evaluate_creative</span><span className="syntax-punctuation">(</span><span className="syntax-argument">project_id</span><span className="syntax-punctuation">)</span></code>
-            <code><span className="syntax-function">optimize_creative</span><span className="syntax-punctuation">(</span><span className="syntax-argument">project_id, max_evaluations=4</span><span className="syntax-punctuation">)</span></code>
+            <code><span className="syntax-function">create_campaign</span><span className="syntax-punctuation">(</span><span className="syntax-argument">spec</span><span className="syntax-punctuation">)</span></code>
+            <code><span className="syntax-function">optimize</span><span className="syntax-punctuation">(</span><span className="syntax-argument">campaign_id, idempotency_key, config, reference_asset_ids</span><span className="syntax-punctuation">)</span></code>
             <small>REVIEW & EXPORT</small>
-            <code><span className="syntax-function">get_evidence</span><span className="syntax-punctuation">(</span><span className="syntax-argument">evaluation_id</span><span className="syntax-punctuation">)</span></code>
+            <code><span className="syntax-function">get_evidence</span><span className="syntax-punctuation">(</span><span className="syntax-argument">run_id, creative_id</span><span className="syntax-punctuation">)</span></code>
             <code><span className="syntax-function">export_result</span><span className="syntax-punctuation">(</span><span className="syntax-argument">run_id</span><span className="syntax-punctuation">)</span></code>
             <div className="terminal-note">
               Authenticated. Bounded. Traceable.

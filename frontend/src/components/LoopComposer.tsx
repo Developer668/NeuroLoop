@@ -1,9 +1,10 @@
 "use client";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowUp, ArrowUpRight, Paperclip, Plug, X, Loader2 } from "lucide-react";
+import { ArrowUpRight, Plug } from "lucide-react";
 import { NeuroMark } from "./Neuro";
 import styles from "./LoopComposer.module.css";
+import { PromptInput } from "./ui/ai-chat-input";
 
 export type ComposeRequest = {
   prompt: string;
@@ -11,6 +12,7 @@ export type ComposeRequest = {
   kind: "image" | "video";
   aspect: string;
   files: File[];
+  duration: number;
 };
 export default function LoopComposer({
   busy,
@@ -23,19 +25,39 @@ export default function LoopComposer({
     [brand, setBrand] = useState(""),
     [kind, setKind] = useState<"image" | "video">("video"),
     [aspect, setAspect] = useState("16:9"),
+    [duration, setDuration] = useState(5),
     [files, setFiles] = useState<File[]>([]);
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem("neuroloop-landing-brief");
+      if (!saved) return;
+      const draft = JSON.parse(saved);
+      if (typeof draft.prompt === "string" && draft.prompt.length <= 8000) {
+        setPrompt(draft.prompt);
+        if (draft.kind === "image" || draft.kind === "video") setKind(draft.kind);
+        sessionStorage.removeItem("neuroloop-landing-brief");
+      }
+    } catch { /* Storage may be unavailable; the empty composer remains usable. */ }
+  }, []);
   const unsupported =
     kind === "image" &&
     files.some((f) => /^(image|video|audio)\//.test(f.type));
-  async function send(event: FormEvent) {
-    event.preventDefault();
-    if (!busy && !unsupported && prompt.trim() && brand.trim()) await submit({ prompt, brand, kind, aspect, files });
+  async function send() {
+    if (!busy && !unsupported && prompt.trim() && brand.trim())
+      await submit({ prompt, brand, kind, aspect, files, duration });
   }
   return (
-    <section className={`neuro-page ${styles.page}`} aria-labelledby="neuro-title">
+    <section
+      className={`neuro-page ${styles.page}`}
+      aria-labelledby="neuro-title"
+    >
       <div className="neuro-page-top">
-        <span><NeuroMark size={23} /> NEURO AI</span>
-        <Link href="/workspace?view=settings"><Plug size={15} /> Connections <ArrowUpRight size={14} /></Link>
+        <span>
+          <NeuroMark size={23} /> NEURO AI
+        </span>
+        <Link href="/workspace?view=settings">
+          <Plug size={15} /> Connections <ArrowUpRight size={14} />
+        </Link>
       </div>
       <div className="neuro-command-intro">
         <NeuroMark size={64} />
@@ -45,111 +67,34 @@ export default function LoopComposer({
         </div>
         <span className="neuro-local-label">Creative workspace</span>
       </div>
-      <form className={`neuro-composer ${styles.composer}`} onSubmit={send} aria-busy={busy}>
-        <label className="sr-only" htmlFor="neuro-creative-direction">Creative direction</label>
-          <textarea
-            id="neuro-creative-direction"
-            aria-label="Creative direction"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            minLength={3}
-            maxLength={12000}
-            required
-            rows={4}
-            placeholder="Describe the scene, product, dialogue, sound, and what you want to improve…"
-          />
-        <fieldset className={styles.settings} disabled={busy}>
-          <legend className="sr-only">Creative settings</legend>
-          <label>
-            Brand or project
-            <input
-              aria-label="Brand or project"
-              value={brand}
-              onChange={(e) => setBrand(e.target.value)}
-              maxLength={120}
-              required
-              placeholder="Brand or project name"
-            />
-          </label>
-          <label>
-            Generate with
-            <select
-              aria-label="Generation model"
-              value={kind}
-              onChange={(e) => setKind(e.target.value as "video" | "image")}
-            >
-              <option value="video">MiniMax H3 · FP8 video</option>
-              <option value="image">Ideogram 4 · FP8 image</option>
-            </select>
-          </label>
-          <label>
-            Aspect ratio
-            <select
-              aria-label="Composer aspect ratio"
-              value={aspect}
-              onChange={(e) => setAspect(e.target.value)}
-            >
-              {["16:9", "9:16", "1:1", "4:5"].map((v) => (
-                <option key={v}>{v}</option>
-              ))}
-            </select>
-          </label>
-        </fieldset>
-        <div className={`nl-reference-chips ${styles.references}`} aria-label="Attached references">
-          {files.map((file, index) => (
-            <span key={`${file.name}-${index}`}>
-              {file.name}
-              <button
-                type="button"
-                aria-label={`Remove ${file.name}`}
-                disabled={busy}
-                onClick={() =>
-                  setFiles((old) => old.filter((_, i) => i !== index))
-                }
-              >
-                <X size={13} />
-              </button>
-            </span>
-          ))}
-        </div>
-        <div className={`neuro-compose-tools ${styles.tools}`}>
-          <label className={`neuro-command-toggle nl-attach ${styles.attach}`}>
-            <Paperclip size={16} /> Add references
-            <input
-              aria-label="Composer references"
-              type="file"
-              multiple
-              disabled={busy}
-              onChange={(e) => {
-                const additions = Array.from(e.target.files || []);
-                setFiles((old) => [...old, ...additions]);
-                e.target.value = "";
-              }}
-            />
-          </label>
-          <span className="neuro-draft-state">{prompt.length ? `${prompt.length.toLocaleString()} / 12,000` : ""}</span>
-          <button
-            className={`neuro-send ${styles.send}`}
-            disabled={busy || unsupported || !prompt.trim() || !brand.trim()}
-            type="submit"
-            aria-label="Start creative loop"
-            title="Start creative loop"
-          >
-            {busy ? <Loader2 size={18} className={styles.spinner} /> : <ArrowUp size={18} />}
-          </button>
-        </div>
-        {unsupported && (
-          <p role="alert" className="nl-error">
-            Ideogram accepts text only. Remove media references or choose
-            MiniMax H3.
-          </p>
-        )}
-      </form>
+      <div className={styles.composer}>
+        <PromptInput
+          value={prompt}
+          onChange={setPrompt}
+          brand={brand}
+          onBrandChange={setBrand}
+          kind={kind}
+          onKindChange={setKind}
+          aspect={aspect}
+          onAspectChange={setAspect}
+          files={files}
+          onFilesChange={setFiles}
+          busy={busy}
+          unsupported={unsupported}
+          onSubmit={send}
+        />
+      </div>
+      {kind === "video" && <label className="ev-select">Video length
+        <select aria-label="Video length" value={duration} disabled={busy} onChange={e => setDuration(Number(e.target.value))}>
+          <option value={5}>5 seconds</option><option value={10}>10 seconds</option><option value={15}>15 seconds</option>
+        </select>
+      </label>}
+      <p className="neuro-footnote">Describe your ad, add references if needed, then press Start creative loop. Your results and progress appear on the run page.</p>
       <details className={styles.details}>
         <summary>Run details</summary>
         <p className="neuro-footnote">
           {kind === "video"
-            ? "15-second video. Images, video, audio, and document references stay with the campaign."
+            ? `${duration}-second video. Images, video, audio, and document references stay with the campaign.`
             : "Text-to-image. Later rounds create alternatives from evaluation evidence; they do not edit the previous image's pixels."}{" "}
           The run uses a maximum of 3 rounds and 10 candidates. Jobs wait when
           the notebook or required models are offline.

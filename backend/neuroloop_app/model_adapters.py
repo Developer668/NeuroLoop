@@ -29,8 +29,14 @@ class H3Adapter:
     def __init__(self, settings):
         self.settings, self.runtime = settings, None
 
+    @property
+    def progress(self):
+        return dict(self.runtime.progress) if self.runtime else {"phase": "Initializing MiniMax H3"}
+
     def __call__(self, ctx):
         ctx.check_cancelled()
+        if set(ctx.parameters) - {"seed"}:
+            raise ProviderFailure("INVALID_OUTPUT", "MiniMax sampling preset is operator-owned; generic controls are unsupported")
         duration = float(ctx.campaign["duration_seconds"])
         if not 2 <= duration <= 15:
             raise ProviderFailure("INVALID_OUTPUT", "MiniMax H3 supports 2–15 seconds in this profile")
@@ -83,9 +89,19 @@ class IdeogramAdapter:
         # Never silently pretend image references were consumed by a text-only API.
         if any(a.kind in {"image", "video", "audio"} and (ctx.current_media is None or a.asset_id != ctx.current_media.asset_id) for a in ctx.references):
             raise ProviderFailure("UNAVAILABLE", "Ideogram 4 cannot consume media references. Use a text-only campaign or a reference-capable image model.")
+        from .ideogram_caption import caption_json
+        if set(ctx.parameters) - {"seed"}:
+            raise ProviderFailure("INVALID_OUTPUT", "Ideogram sampling preset is operator-owned; generic controls are unsupported")
+        try:
+            caption = caption_json(ctx.prompt)
+        except (ValueError, TypeError) as exc:
+            raise ProviderFailure("INVALID_OUTPUT", "Ideogram requires a reviewed structured JSON caption") from exc
         import torch
         from ideogram4 import Ideogram4Pipeline, Ideogram4PipelineConfig, PRESETS
         from ideogram4.caption_verifier import CaptionVerifier
+        issues = CaptionVerifier().verify_raw(caption)
+        if issues:
+            raise ProviderFailure("INVALID_OUTPUT", "Invalid Ideogram caption: " + "; ".join(issues))
         if not torch.cuda.is_available():
             raise ProviderFailure("UNAVAILABLE", "Ideogram FP8 requires the configured CUDA GPU host")
         if self.pipe is None:
@@ -105,12 +121,6 @@ class IdeogramAdapter:
             if not count:
                 self.park()
                 raise ProviderFailure("INVALID_OUTPUT", "Expected Ideogram FP8 layers")
-        caption = json.dumps({"high_level_description": ctx.prompt,
-            "style_description": {"aesthetics": ctx.campaign["brand"].get("voice") or "clean commercial photography", "lighting": "natural lighting", "medium": "photography", "art_style": "photorealistic"},
-            "compositional_deconstruction": {"background": "As described in the creative brief", "elements": [{"type": "obj", "desc": ctx.prompt}]}})
-        issues = CaptionVerifier().verify_raw(caption)
-        if issues:
-            raise ProviderFailure("INVALID_OUTPUT", "Invalid Ideogram caption: " + "; ".join(issues))
         width, height = dimensions(ctx.campaign["aspect_ratio"], self.settings.model_long_edge, 16)
         preset = PRESETS["V4_TURBO_12"]
         images = self.pipe(caption, width=width, height=height, num_steps=preset.num_steps,

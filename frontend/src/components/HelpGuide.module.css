@@ -1,0 +1,19 @@
+.guide { max-width: 960px; margin: 0 auto; line-height: 1.7; }
+.guide header > span { font-size: 12px; letter-spacing: .12em; }
+.guide h1 { font-size: clamp(26px, 4vw, 38px); line-height: 1.2; margin: 12px 0; }
+.guide p, .guide li, .guide dd { font-size: 15px; }
+.shortcuts, .contents { display: flex; flex-wrap: wrap; gap: 10px; margin: 24px 0; }
+.shortcuts a, .contents a { color: inherit; border: 1px solid var(--border, #dce2e7); border-radius: 9px; padding: 9px 14px; text-decoration: none; }
+.shortcuts a { background: #38bcb118; }
+.contents a { font-size: 13px; }
+.guide a:hover { text-decoration: underline; }
+.guide a:focus-visible { outline: 2px solid #38bcb1; outline-offset: 3px; }
+.guide section { border: 1px solid var(--border, #dce2e7); border-radius: 16px; padding: 24px; margin: 20px 0; scroll-margin-top: 90px; }
+.guide h2 { display: flex; align-items: baseline; gap: 12px; font-size: 20px; margin: 0 0 18px; line-height: 1.4; }
+.guide h2 span { color: #238d83; }
+.guide li { padding-left: 5px; margin: 12px 0; }
+.guide ol { padding-left: 22px; }
+.guide dt { font-weight: 650; margin-top: 18px; }
+.guide dd { margin: 4px 0 0; }
+.flow { padding: 14px; border-radius: 10px; background: #38bcb118; font-weight: 600; }
+@media (max-width: 600px) { .guide section { padding: 16px; } }

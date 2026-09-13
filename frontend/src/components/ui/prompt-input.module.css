@@ -1,0 +1,315 @@
+.wrap {
+  width: 100%;
+  max-width: 320px;
+  margin: auto;
+  transition: max-width 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  color: var(--ink);
+}
+.expanded {
+  max-width: 560px;
+}
+.card {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--surface);
+  box-shadow: 0 2px 6px #00000005;
+  padding: 0;
+  transition: border-color 0.2s;
+}
+.card:focus-within {
+  border-color: var(--accent);
+}
+.wrap button,
+.wrap input,
+.wrap select,
+.wrap textarea {
+  font: inherit;
+  color: inherit;
+  box-sizing: border-box;
+}
+.wrap button {
+  cursor: pointer;
+}
+.wrap button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.wrap :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.open {
+  width: 100%;
+  height: 48px;
+  border: 0;
+  background: none;
+  text-align: left;
+  padding: 0 48px 0 16px;
+  font-size: 14px !important;
+  color: var(--muted) !important;
+}
+.input {
+  display: block;
+  width: 100%;
+  min-height: 90px;
+  max-height: 180px;
+  resize: none;
+  border: 0;
+  background: none;
+  padding: 16px 18px 8px;
+  outline: none !important;
+  font-size: 14px !important;
+  line-height: 1.65 !important;
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px 8px 10px;
+}
+.tool,
+.send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  border-radius: 18px;
+  height: 34px;
+  padding: 0 9px;
+  font-size: 12px !important;
+  white-space: nowrap;
+}
+.tool:hover {
+  background: var(--paper);
+}
+.send {
+  width: 34px;
+  flex-shrink: 0;
+  padding: 0;
+  background: var(--ink);
+  color: var(--surface) !important;
+}
+.collapsedMic {
+  position: absolute;
+  right: 7px;
+  top: 7px;
+}
+.spacer {
+  flex: 1;
+}
+.model {
+  position: relative;
+}
+.menu {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 10px);
+  left: 0;
+  width: 230px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 8px 30px #00000012;
+  padding: 6px;
+}
+.menu button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 10px;
+  text-align: left;
+  border-radius: 10px;
+  font-size: 12px;
+}
+.menu button:hover,
+.menu button[aria-checked="true"] {
+  background: var(--paper);
+}
+.menu small {
+  display: block;
+  color: var(--muted);
+  margin-top: 3px;
+}
+.settings {
+  margin: 14px 8px 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.settings label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.settings input {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  min-width: 0;
+  width: 100%;
+  padding: 8px 0;
+  font-size: 12px;
+}
+.ratio {
+  max-width: 72px;
+  border: 0;
+  background: transparent;
+  font-size: 12px !important;
+  padding: 7px 0;
+}
+.tray {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  margin: 0 18px;
+  padding: 8px 8px 12px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: 16px 16px 0 0;
+}
+.thumb {
+  position: relative;
+  flex: 0 0 48px;
+  height: 48px;
+}
+.preview {
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--line);
+  padding: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface);
+  display: grid;
+  place-items: center;
+}
+.preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.remove {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 50%;
+  width: 19px;
+  height: 19px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.meta {
+  display: flex;
+  justify-content: space-between;
+  margin: 12px 8px 0;
+  color: var(--muted);
+  font-size: 10px;
+  gap: 10px;
+}
+.error {
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 12px 8px 0;
+}
+.dialog {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--surface);
+  color: var(--ink);
+  width: min(640px, 90vw);
+  max-height: 85dvh;
+  padding: 20px;
+}
+.dialog::backdrop {
+  background: #0008;
+  backdrop-filter: blur(6px);
+}
+.dialog header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  overflow-wrap: anywhere;
+}
+.dialog img,
+.dialog video {
+  display: block;
+  max-width: 100%;
+  max-height: 60dvh;
+  margin: auto;
+  border-radius: 10px;
+}
+.dialog audio {
+  width: 100%;
+}
+.dialog button {
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.dialog a {
+  color: inherit;
+}
+@media (max-width: 600px) {
+  .expanded {
+    max-width: 100%;
+  }
+  .tool {
+    padding: 0 6px;
+    font-size: 11px !important;
+  }
+  .settings {
+    flex-wrap: wrap;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wrap {
+    transition: none;
+  }
+}
+:global([data-motion="reduced"]) .wrap {
+  transition: none;
+}
+/* Keep existing workspace form defaults from overriding the supplied card. */
+.wrap .card .input {
+  border: 0;
+  border-radius: 24px 24px 0 0;
+  background: transparent;
+  resize: none;
+  box-shadow: none;
+  min-height: 90px;
+  padding: 16px 18px 8px;
+}
+.wrap .card .ratio {
+  border: 0;
+  background: transparent;
+  padding: 7px 0;
+  min-height: 0;
+  width: 68px;
+}
+.wrap .settings input {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 8px 0;
+}
+
+.attach { width: auto !important; gap: 6px; padding-inline: 10px; font-size: 12px; white-space: nowrap; }

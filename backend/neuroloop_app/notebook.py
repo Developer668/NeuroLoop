@@ -148,14 +148,18 @@ class ModelRegistry:
                 if old.park:
                     old.park()
             if entry.callable is None:
-                entry.callable = entry.loader()
+                from .notebook_telemetry import operation
+                with operation("model_load", {"capability": capability, "model": entry.provenance.model}):
+                    entry.callable = entry.loader()
                 if not callable(entry.callable):
                     raise ProviderFailure("NOT_CONFIGURED", "Model loader did not return a real callable")
             if entry.activate and self.active != capability:
                 entry.activate()
             self.active = capability
             context.check_cancelled()
-            output = entry.callable(context)
+            from .notebook_telemetry import operation
+            with operation("model_inference", {"capability": capability, "model": entry.provenance.model}):
+                output = entry.callable(context)
             context.check_cancelled()
             return output, entry.provenance
 
@@ -215,6 +219,8 @@ class NotebookWorker:
 
     def capabilities(self):
         capabilities = self.registry.describe()
+        capabilities["summary"] = {"status": "READY" if self.settings.wandb_api_key.get_secret_value() and self.settings.inference_model else "NOT_CONFIGURED",
+                                   "model": self.settings.inference_model, "cost_ceiling_usd": self.settings.reasoner_cost_ceiling_usd}
         capabilities["reasoner"] = {"status": "READY" if self.settings.wandb_api_key.get_secret_value() and self.settings.inference_model else "NOT_CONFIGURED",
                                     "model": self.settings.inference_model, "detail": "W&B Inference; configured is not execution-verified", "cost_ceiling_usd": self.settings.reasoner_cost_ceiling_usd}
         capabilities["typesafe"] = {"status": "READY" if self.settings.typesafe_api_key.get_secret_value() else "NOT_CONFIGURED",
@@ -325,8 +331,11 @@ class NotebookWorker:
                         cancelled.set()
                         break
                     try:
+                        entry = self.registry.models.get(job["capability"])
+                        model_progress = getattr(entry.callable, "progress", {}) if entry else {}
+                        model_phase = model_progress.get("phase") if isinstance(model_progress, dict) else None
                         state = self._post(f"/api/v2/jobs/{job['id']}/heartbeat", {**self._lease(job), "progress": {
-                            "message": f"{job['capability']} executing in notebook; elapsed {int(time.monotonic() - started)}s",
+                            "message": model_phase or f"{job['capability']} executing in notebook; elapsed {int(time.monotonic() - started)}s",
                             "elapsed_seconds": round(time.monotonic() - started, 1), "phase": job["kind"],
                         }})
                         failures = 0
@@ -342,7 +351,14 @@ class NotebookWorker:
             heartbeat.start()
             try:
                 cached = folder / "result.json"
-                result = json.loads(cached.read_text()) if cached.exists() else self._execute(job, output_dir, should_cancel)
+                if cached.exists():
+                    result = json.loads(cached.read_text())
+                else:
+                    from .notebook_telemetry import initialize, operation
+                    initialize(self.settings)
+                    with operation("job_execution", {"job_id": job["id"], "run_id": job["run_id"], "kind": job["kind"], "attempt": job.get("attempt")}) as telemetry:
+                        result = self._execute(job, output_dir, should_cancel)
+                        telemetry["model"] = result.get("model") or result.get("provenance", {}).get("model")
                 atomic_json(cached, result)  # Persist BEFORE acknowledgement.
                 self._post(f"/api/v2/jobs/{job['id']}/complete", {**self._lease(job), "result": result})
                 atomic_json(folder / "delivered.json", {"delivered": True})
@@ -385,6 +401,14 @@ class NotebookWorker:
 
     def _execute(self, job, output_dir, cancelled):
         payload = job["payload"]
+        if job["kind"] == "SUMMARY":
+            self.reasoner.last_summary_receipt = None
+            try:
+                return self.reasoner.summarize(payload["evidence"], payload["execution"])
+            finally:
+                receipt = getattr(self.reasoner, "last_summary_receipt", None)
+                if receipt:
+                    atomic_json(output_dir / "summary-provider-receipt.json", receipt)
         if job["kind"] == "PLAN":
             from .vision_adapter import VisionAdapter
             from types import SimpleNamespace
@@ -398,7 +422,13 @@ class NotebookWorker:
                 seen.add(metadata["asset_id"])
                 if metadata["kind"] in {"image", "video"}:
                     media.extend(vision.media_content(self._download(metadata), SimpleNamespace(check_cancelled=lambda: self._check_plan_cancelled(cancelled)), count=6))
-            return self.reasoner.plan(payload, media_content=media).model_dump()
+            self.reasoner.last_plan_receipt = None
+            try:
+                return self.reasoner.plan(payload, media_content=media).model_dump()
+            finally:
+                receipt = getattr(self.reasoner, "last_plan_receipt", None)
+                if receipt:
+                    atomic_json(output_dir / "plan-provider-receipt.json", receipt)
         if job["kind"] == "REVIEW_PLAN":
             return self.kernel.review_plan(payload).model_dump()
         if job["kind"] == "DECIDE":

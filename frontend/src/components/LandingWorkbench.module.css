@@ -1,0 +1,46 @@
+.experience { color: var(--ink); }
+.walkthrough, .briefSection { max-width: 1440px; margin: auto; padding: 100px 6%; }
+.intro { display: grid; grid-template-columns: 1fr 1fr; align-items: end; column-gap: 80px; }
+.intro > span { grid-column: 1 / -1; }
+.experience h2 { font: inherit; font-size: clamp(36px, 4.5vw, 64px); font-weight: 500; line-height: 1.08; letter-spacing: -.045em; margin: 24px 0; }
+.experience p { color: var(--muted); font-size: 16px; line-height: 1.8; max-width: 480px; }
+.stage { margin-top: 45px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.chapters { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); }
+.chapters button { background: transparent; border: 0; color: var(--muted); display: flex; gap: 12px; align-items: center; padding: 24px 12px; cursor: pointer; text-align: left; font: inherit; font-size: 14px; position: relative; }
+.chapters button::after { content: ''; position: absolute; height: 2px; bottom: 0; left: 12px; right: 12px; background: var(--wine); transform: scaleX(0); transform-origin: left; transition: transform .35s; }
+.chapters button[aria-pressed=true] { color: var(--wine); }
+.chapters button[aria-pressed=true]::after { transform: scaleX(1); }
+.chapters button span { font-size: 11px; opacity: .7; }
+.chapters button svg { margin-left: auto; }
+.detail { display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 50px; min-height: 450px; padding: 36px; animation: arrive .45s ease both; }
+.object { position: relative; height: 340px; perspective: 1000px; display: grid; place-items: center; }
+.sheetFront, .sheetMiddle, .sheetBack { position: absolute; width: min(280px, 85%); height: 300px; border: 1px solid var(--line); background: var(--paper); border-radius: 12px; transform: rotateY(-14deg) rotateX(8deg) rotateZ(-4deg); transition: transform .7s cubic-bezier(.2,.7,.2,1); }
+.sheetBack { transform: translate(-24px, -16px) rotateY(-14deg) rotateZ(-12deg); }
+.sheetMiddle { transform: translate(18px, 6px) rotateY(-14deg) rotateZ(4deg); }
+.sheetFront { padding: 25px; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 24px 40px color-mix(in srgb, var(--ink) 9%, transparent); }
+.sheetFront > span, .sheetFront small { font-size: 10px; letter-spacing: .08em; color: var(--muted); }
+.sheetFront > svg { color: var(--wine); }
+.sheetFront strong { font-size: 25px; font-weight: 500; line-height: 1.2; }
+.rule { width: 100%; height: 1px; background: var(--line); }
+@media (hover: hover) { .object:hover .sheetFront { transform: translateY(-8px) rotateY(0) rotateX(0); } .object:hover .sheetBack { transform: translate(-38px,-12px) rotateZ(-15deg); } .object:hover .sheetMiddle { transform: translate(34px,8px) rotateZ(9deg); } }
+.chapterCopy h3 { font-size: clamp(25px,3vw,38px); line-height: 1.15; letter-spacing: -.03em; font-weight: 500; margin: 18px 0; }
+.chapterCopy ul { padding: 0; margin: 24px 0; list-style: none; display: flex; flex-wrap: wrap; gap: 8px 18px; color: var(--muted); font-size: 12px; }
+.chapterCopy li::before { content: '— '; color: var(--wine); }
+.experience .caption { font-size: 12px; max-width: none; margin-top: 16px; }
+.briefSection { padding-top: 60px; display: grid; grid-template-columns: .8fr 1.2fr; gap: 80px; align-items: center; }
+.editor { border: 1px solid var(--line); border-radius: 14px; background: var(--paper); box-shadow: 0 20px 50px color-mix(in srgb, var(--ink) 5%, transparent); overflow: hidden; }
+.editorTop { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); padding: 18px 24px; font-size: 10px; letter-spacing: .12em; color: var(--muted); }
+.presets { padding: 20px 24px 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+.presets button { border: 1px solid var(--line); color: var(--muted); background: transparent; border-radius: 30px; padding: 8px 12px; font: inherit; font-size: 12px; cursor: pointer; }
+.presets button[aria-pressed=true] { border-color: var(--wine); color: var(--wine); }
+.promptLabel { display: block; margin: 8px 24px; font-size: 12px; color: var(--muted); }
+.editor textarea { width: calc(100% - 48px); margin: 0 24px; padding: 0; min-height: 185px; border: 0; resize: vertical; color: var(--ink); background: transparent; font: inherit; font-size: 16px; line-height: 1.8; }
+.editorBottom { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 20px 24px; border-top: 1px solid var(--line); }
+.editorBottom > span, .draftNote { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.draftNote { display: block; padding: 0 24px 20px; }
+.editorBottom button { white-space: nowrap; }
+.experience button:focus-visible, .experience a:focus-visible, .editor textarea:focus-visible { outline: 2px solid var(--wine); outline-offset: 4px; }
+@keyframes arrive { from { opacity: .4; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@media(max-width:800px) { .intro { grid-template-columns:1fr; } .walkthrough, .briefSection { padding: 60px 6%; } .briefSection { grid-template-columns:1fr; gap:30px; } .detail { gap:24px; padding:24px 0; } .chapters button { font-size:12px; padding:20px 5px; gap:5px; } .chapters button svg { display:none; } }
+@media(max-width:560px) { .detail { grid-template-columns:1fr; } .object { height:300px; } .sheetFront,.sheetBack,.sheetMiddle { height:260px; width:220px; } .chapters { grid-template-columns:1fr 1fr; } .editorBottom { align-items:stretch; flex-direction:column; } .editor textarea { min-height:245px; } }
+@media(prefers-reduced-motion:reduce) { .detail { animation:none; } .sheetFront,.sheetBack,.sheetMiddle,.chapters button::after { transition:none; } }

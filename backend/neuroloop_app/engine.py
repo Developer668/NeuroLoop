@@ -15,11 +15,11 @@ import math
 from sqlalchemy import select
 from .config import Settings
 from .db import (Asset, Campaign, Creative, Decision, Deployment, Evaluation, Event,
-                 Feedback, Intervention, Job, PolicyProposal, Run, Store, Trace, Worker, Deployment, record)
+                 Feedback, Intervention, Job, NotebookEvidence, PolicyProposal, Run, Store, Trace, Worker, Deployment, record)
 from .domain import (CampaignSpec, CandidatePlan, CompleteJob, DecisionResult, DeploymentSpec,
                      EvaluationResult, FailJob, FeedbackRequest, GenerationResult, PlanResult, PlanReview,
                      ResearchProposal, RunConfig, RunState, StartRun, TERMINAL, PAUSED,
-                     WorkerHello, digest, now, uid)
+                     WorkerHello, ExecutionSummary, ModelProvenance, digest, now, uid)
 from .storage import ObjectStore, StorageError, inspect_media, extract_document
 
 
@@ -165,7 +165,7 @@ class LoopEngine:
                  "size": a.size, "details": a.details, "download_path": f"/api/v2/assets/{a.id}/content"}
                 for a in [required(session, Asset, identity) for identity in ids]]
 
-    def _plan_job(self, session, run, parents, conditioning="media"):
+    def _plan_job(self, session, run, parents, conditioning="media", constraint_repair=False):
         cfg = RunConfig.model_validate(run.snapshot["config"])
         remaining = cfg.max_candidates - run.stats["generation_count"]
         specs = []
@@ -184,7 +184,8 @@ class LoopEngine:
                    "references": self._asset_refs(session, run.snapshot["reference_asset_ids"]),
                    "parents": [{"creative": record(p), "asset": self._asset_refs(session, [p.output_asset_id])[0], "evidence": self._evidence(session, p)} for p in parents],
                    "human_feedback": recent_feedback, "intervention_history": prior,
-                   "last_decision": run.stats.get("last_decision")}
+                   "last_decision": run.stats.get("last_decision"),
+                   "constraint_repair": constraint_repair}
         capability = "generate_" + run.snapshot["campaign"]["media_kind"]
         payload["generator_contracts"] = [w.capabilities[capability] for w in session.scalars(select(Worker))
             if w.capabilities.get(capability, {}).get("status") == "READY"]
@@ -194,7 +195,7 @@ class LoopEngine:
     def register_worker(self, hello: WorkerHello):
         if hello.provider.lower() == "molab" and not hello.provider_workload_approved:
             raise DomainError("Molab workload approval is required; outbound transport is not a provider-policy exemption", 403)
-        allowed = {"reasoner", "typesafe", "generate_video", "generate_image", "evaluate_vision", "evaluate_tsam", "evaluate_tribe"}
+        allowed = {"reasoner", "typesafe", "summary", "generate_video", "generate_image", "evaluate_vision", "evaluate_tsam", "evaluate_tribe"}
         if set(hello.capabilities) - allowed:
             raise DomainError("Unknown worker capability", 422)
         with self.store.transaction() as session:
@@ -238,11 +239,16 @@ class LoopEngine:
             jobs = session.scalars(select(Job).where(Job.status.in_(["PENDING", "RETRY"]), Job.available_at <= now(), Job.capability.in_(ready)).order_by(Job.created_at).with_for_update(skip_locked=True)).all()
             for job in jobs:
                 run = required(session, Run, job.run_id, lock=True)
-                if run.state in TERMINAL or run.state in PAUSED:
+                summary_allowed = job.kind == "SUMMARY" and run.state in {RunState.READY_FOR_REVIEW, RunState.COMPLETE}
+                if (run.state in TERMINAL or run.state in PAUSED) and not summary_allowed:
                     continue
                 cfg = RunConfig.model_validate(run.snapshot["config"])
                 reason = self._budget_reason(run, cfg)
                 if reason:
+                    if job.kind == "SUMMARY":
+                        job.status, job.completed_at = "CANCELLED", now()
+                        emit(session, run, "SUMMARY_SKIPPED", reason=reason)
+                        continue
                     self._review(session, run, reason)
                     self._cancel_pending(session, run)
                     continue
@@ -252,10 +258,18 @@ class LoopEngine:
                     if reservation is None and job.kind == "GENERATE":
                         reservation = cfg.generation_cost_reservation_usd
                     if not isinstance(reservation, (int, float)) or isinstance(reservation, bool) or not math.isfinite(reservation) or reservation < 0:
+                        if job.kind == "SUMMARY":
+                            job.status, job.completed_at = "CANCELLED", now()
+                            emit(session, run, "SUMMARY_SKIPPED", reason="MISSING_CONSERVATIVE_COST_QUOTE")
+                            continue
                         run.state, run.stop_reason = RunState.NEEDS_ATTENTION, "MISSING_CONSERVATIVE_COST_QUOTE"
                         emit(session, run, "COST_PREFLIGHT_BLOCKED", job_id=job.id)
                         continue
                     if stats["budget_committed_usd"] + reservation > cfg.max_cost_usd:
+                        if job.kind == "SUMMARY":
+                            job.status, job.completed_at = "CANCELLED", now()
+                            emit(session, run, "SUMMARY_SKIPPED", reason="COST_BUDGET_EXHAUSTED")
+                            continue
                         self._review(session, run, "COST_BUDGET_EXHAUSTED")
                         self._cancel_pending(session, run)
                         continue
@@ -299,6 +313,10 @@ class LoopEngine:
             cfg = RunConfig.model_validate(run.snapshot["config"])
             remaining = cfg.max_wall_seconds - (now() - run.created_at)
             if remaining <= 0:
+                if job.kind == "SUMMARY":
+                    job.status, job.completed_at = "CANCELLED", now()
+                    emit(session, run, "SUMMARY_SKIPPED", reason="WALL_TIME_BUDGET_EXHAUSTED")
+                    return {"cancelled": True, "reason": "Summary exceeded the run time budget"}
                 self._review(session, run, "WALL_TIME_BUDGET_EXHAUSTED")
                 job.status = "UNCERTAIN" if job.kind == "GENERATE" else "CANCELLED"
                 return {"cancelled": True, "reason": run.stop_reason}
@@ -326,7 +344,7 @@ class LoopEngine:
                     job.status, job.available_at = "RETRY", now() + min(60, 2 ** job.attempt)
                 else:
                     job.status = "DEAD_LETTER"
-                    if run.state not in TERMINAL:
+                    if run.state not in TERMINAL and job.kind != "SUMMARY":
                         run.state, run.stop_reason = RunState.NEEDS_ATTENTION, "JOB_RETRIES_EXHAUSTED"
                 job.error = {"code": "LEASE_EXPIRED", "detail": "Notebook heartbeat stopped; no result invented"}
                 close_trace(session, job.progress.get("trace_id"), {"status": job.status}, "LeaseExpired")
@@ -390,9 +408,29 @@ class LoopEngine:
             elif job.kind == "DECIDE":
                 result = DecisionResult.model_validate(request.result)
                 self._complete_decision(session, run, job, result)
+            elif job.kind == "SUMMARY":
+                result = ExecutionSummary.model_validate(request.result)
+                if result.input_digest != digest({"evidence": job.payload["evidence"], "execution": job.payload["execution"]}):
+                    raise DomainError("Summary does not match its recorded input", 422)
+                if not set(result.evidence_ids) <= {e["id"] for e in job.payload["evidence"]}:
+                    raise DomainError("Summary cites unknown evidence", 422)
+                model = session.get(Worker, job.worker_id).capabilities["summary"].get("model")
+                if not model or result.provider_receipt.get("model") != model:
+                    raise DomainError("Summary provider model does not match worker", 422)
+                provenance = ModelProvenance(model=model, version="evidence-summary-v1", configuration_hash=digest({"contract": "evidence-summary-v1"}))
+                for identity in job.payload["asset_ids"]:
+                    session.add(NotebookEvidence(campaign_id=run.campaign_id, input_asset_id=identity,
+                        source_receipt=f"summary-{job.id}-{identity}", source_kind="campaign_loop",
+                        title="GLM — automatic run summary", evaluator="summary", comparison_key=provenance.comparison_key,
+                        result={"evaluator": "summary", "status": "SUCCEEDED", "provenance": provenance.model_dump(),
+                                "observations": result.model_dump(), "scores": {}, "artifact_ids": [],
+                                "limitations": ["Explanation of recorded evidence; does not add measurements or override policy decisions."]}))
             else:
                 raise DomainError("Unsupported job type", 422)
             job.result, job.result_hash, job.status = request.result, result_hash, "SUCCEEDED"
+            # Previous failed attempts remain in JOB_FAILED events and traces.
+            # The current successful job must not retain a live error badge.
+            job.error = None
             job.completed_at = now()
             close_trace(session, job.progress.get("trace_id"), {"status": "SUCCEEDED", "creative_id": job.creative_id,
                          "model": request.result.get("model") or request.result.get("provenance", {}).get("model"),
@@ -400,7 +438,7 @@ class LoopEngine:
                          "decision": request.result.get("decision"), "confidence": request.result.get("confidence"),
                          "scores": request.result.get("scores"), "usage": request.result.get("usage"),
                          "plan_hash": request.result.get("plan_hash"), "plan_review": request.result.get("choice"),
-                         "candidate_edits": [{"parent_creative_id": p.get("parent_creative_id"), "edit_intent": p.get("edit_intent")} for p in request.result.get("candidates", [])],
+                         "candidate_edits": [{"parent_creative_id": p.get("parent_creative_id"), "edit_intent_hash": digest(p.get("edit_intent"))} for p in request.result.get("candidates", [])],
                          "selected_creative_ids": request.result.get("selected_creative_ids"),
                          "response_delta": run.stats.get("last_gain") if job.kind == "DECIDE" else None,
                          "vision_receipt": request.result.get("observations", {}).get("provider_receipt")})
@@ -409,7 +447,44 @@ class LoopEngine:
                 run.state, run.stop_reason = RunState.GENERATING, None
             session.flush()
             self._advance(session, run, job.worker_id)
+            if job.kind != "SUMMARY":
+                self._queue_summary(session, run)
             return {"status": job.status, "run_id": run.id, "run_state": run.state}
+
+    def _queue_summary(self, session, run):
+        if run.state not in {RunState.READY_FOR_REVIEW, RunState.COMPLETE}:
+            return
+        last_work = session.scalar(select(Job).where(Job.run_id == run.id, Job.kind != "SUMMARY").order_by(Job.created_at.desc()))
+        summary_key = f"{run.id}:summary:{last_work.id if last_work else 'empty'}"
+        if session.scalar(select(Job.id).where(Job.idempotency_key == summary_key)):
+            return
+        online = session.scalars(select(Worker).where(Worker.heartbeat_at > now() - self.settings.worker_stale_seconds))
+        if not any(w.capabilities.get("summary", {}).get("status") == "READY" for w in online):
+            return
+        creatives = list(session.scalars(select(Creative).where(Creative.run_id == run.id)))
+        evidence = [record(e) for e in session.scalars(select(Evaluation).where(Evaluation.run_id == run.id))]
+        execution = {"run": record(run), "creatives": [record(c) for c in creatives],
+            "planning_receipts": [{"id": j.id, "kind": j.kind, "status": j.status, "result": j.result, "error": j.error} for j in session.scalars(select(Job).where(Job.run_id == run.id, Job.kind.in_(["PLAN", "REVIEW_PLAN"])))],
+            "decisions": [record(d) for d in session.scalars(select(Decision).where(Decision.run_id == run.id))],
+            "generation_receipts": [{"id": j.id, "status": j.status, "result": j.result} for j in session.scalars(select(Job).where(Job.run_id == run.id, Job.kind == "GENERATE"))]}
+        self._enqueue(session, run, "SUMMARY", "summary", {"evidence": evidence, "execution": execution,
+            "asset_ids": [c.output_asset_id for c in creatives if c.output_asset_id]}, summary_key)
+
+    def retry_summary(self, run_id):
+        """Retry explanation delivery without reopening a creative decision."""
+        with self.store.transaction() as session:
+            run = required(session, Run, run_id, lock=True)
+            if run.state not in {RunState.READY_FOR_REVIEW, RunState.COMPLETE}:
+                raise DomainError("The creative run must finish before retrying its summary")
+            job = session.scalar(select(Job).where(Job.run_id == run.id, Job.kind == "SUMMARY").order_by(Job.created_at.desc()))
+            if job is None:
+                self._queue_summary(session, run)
+            elif job.status == "FAILED" and job.attempt < job.max_attempts:
+                job.status, job.available_at, job.lease_hash = "RETRY", now(), None
+                emit(session, run, "SUMMARY_RETRY_REQUESTED", job_id=job.id)
+            elif job.status not in {"SUCCEEDED", "PENDING", "RETRY", "LEASED"}:
+                raise DomainError("Summary retry limit or budget reached")
+            return {"run_id": run.id, "run_state": run.state}
 
     def _account_result(self, run, result):
         stats = dict(run.stats)
@@ -428,6 +503,8 @@ class LoopEngine:
             if hypothesis is None:
                 raise DomainError("Regeneration requires observation, visual evidence, hypothesis and modification", 422)
             evaluations = {e.id: e for e in session.scalars(select(Evaluation).where(Evaluation.creative_id == plan.parent_creative_id, Evaluation.run_id == run.id))}
+            if not set(plan.edit_intent.reasoning_evidence_ids) <= set(evaluations):
+                raise DomainError("Reasoning evidence IDs must identify parent evaluations, not creative or asset IDs", 422)
             observation = hypothesis.observation
             sensor = evaluations.get(observation.evaluation_id)
             visual = evaluations.get(hypothesis.creative_evidence.evaluation_id)
@@ -487,7 +564,10 @@ class LoopEngine:
             run = required(session, Run, job.run_id, lock=True)
             self._account_result(run, request.model_dump())
             job.error = {"code": request.code, "detail": request.detail}
-            if request.code == "UNCERTAIN":
+            if job.kind == "SUMMARY":
+                job.status = "RETRY" if request.safe_to_retry and request.code in {"TRANSIENT", "INVALID_OUTPUT"} and job.attempt < job.max_attempts else "FAILED"
+                job.available_at = now() + min(60, 2 ** job.attempt)
+            elif request.code == "UNCERTAIN":
                 job.status, run.state, run.stop_reason = "UNCERTAIN", RunState.NEEDS_ATTENTION, "UNKNOWN_PROVIDER_OUTCOME"
             elif request.safe_to_retry and (request.code in {"TRANSIENT", "OUT_OF_MEMORY"} or (request.code == "INVALID_OUTPUT" and job.kind in {"PLAN", "REVIEW_PLAN", "DECIDE"})) and job.attempt < job.max_attempts:
                 job.status, job.available_at = "RETRY", now() + min(60, 2 ** job.attempt)
@@ -525,6 +605,10 @@ class LoopEngine:
         vision = latest.get("vision")
         checks = {c["name"]: c for c in vision.result.get("constraints", [])} if vision else {}
         hard += [checks.get(name, {"name": name, "status": "UNKNOWN", "evidence": "No verified evaluator result for this requirement"}) for name in sorted(required_names)]
+        delivery = vision.result.get("observations", {}).get("media_delivery") if vision else None
+        if delivery in {"PROVIDER_REFUSAL", "UNUSABLE"}:
+            hard.append({"name": "generated_media_delivered", "status": "FAIL",
+                         "evidence": "Vision classified the actual pixels as " + delivery + "; this is not an ad deliverable."})
         scores = vision.result.get("scores", {}) if vision and vision.result["status"] == "SUCCEEDED" else {}
         quality = scores.get("creative_quality")
         cfg = RunConfig.model_validate(run.snapshot["config"])
@@ -580,12 +664,17 @@ class LoopEngine:
             return
         # Screen on comparable vision quality, never a mixture of raw cortical and affect scales.
         evidence = {c.id: self._evidence(session, c) for c in generated}
-        valid = [c for c in generated if evidence[c.id]["quality"] and all(x["status"] == "PASS" for x in evidence[c.id]["hard_constraints"])]
+        refused = {c.id for c in generated if any(e["evaluator"] == "vision" and e["result"].get("observations", {}).get("media_delivery") == "PROVIDER_REFUSAL" for e in evidence[c.id]["evaluations"])}
+        valid = [c for c in generated if c.id not in refused and evidence[c.id]["quality"] and all(x["status"] == "PASS" for x in evidence[c.id]["hard_constraints"])]
         for c in generated:
             if c not in valid:
                 c.status, c.rejection_reason = "INVALID", "Failed or unknown hard constraints, or missing creative-quality evidence"
+                if c.id in refused:
+                    c.rejection_reason = "Provider refusal placeholder detected by vision; no advertisement delivered"
         if not valid:
-            self._review(session, run, "INSUFFICIENT_EVIDENCE_OR_CONSTRAINT_FAILURE")
+            if self._repair_constraints(session, run, generated, evidence):
+                return
+            self._review(session, run, "PROVIDER_REFUSAL_NO_AD_DELIVERED" if len(refused) == len(generated) else "INSUFFICIENT_EVIDENCE_OR_CONSTRAINT_FAILURE")
             return
         keys = {evidence[c.id]["quality_comparison_key"] for c in valid}
         if len(keys) != 1:
@@ -596,12 +685,15 @@ class LoopEngine:
             if c not in promoted:
                 c.status, c.rejection_reason = "SCREENED_OUT", "Not promoted by the bounded multi-fidelity screen; artifact preserved"
         worker = session.get(Worker, worker_id)
+        online_workers = list(session.scalars(select(Worker).where(
+            Worker.heartbeat_at > now() - self.settings.worker_stale_seconds)))
         queued = False
         for creative in promoted:
             for evaluator in list(dict.fromkeys(cfg.required_evaluators + cfg.optional_evaluators)):
                 if evaluator == "vision" or (creative.id, evaluator) in done:
                     continue
-                available = worker and worker.capabilities.get(f"evaluate_{evaluator}", {}).get("status") == "READY"
+                available = any(w.capabilities.get(f"evaluate_{evaluator}", {}).get("status") == "READY"
+                                for w in online_workers)
                 if available or evaluator in cfg.required_evaluators:
                     self._evaluation_job(session, run, creative, evaluator)
                     queued = True
@@ -630,12 +722,89 @@ class LoopEngine:
                    "allowed_actions": ["KEEP", "REGENERATE", "GENERATE_ALTERNATIVE", "RUN_MORE_EVALUATION", "ASK_HUMAN", "READY_FOR_DEPLOYMENT", "STOP", "REJECT"],
                    "incumbent_creative_id": run.champion_id,
                    "history": [record(d) for d in session.scalars(select(Decision).where(Decision.run_id == run.id))]}
-        generator = worker.capabilities.get("generate_" + run.snapshot["campaign"]["media_kind"], {}) if worker else {}
+        capability = "generate_" + run.snapshot["campaign"]["media_kind"]
+        generators = [w.capabilities[capability] for w in online_workers
+                      if w.capabilities.get(capability, {}).get("status") == "READY"]
+        generator = generators[0] if generators else {}
         if generator.get("supports_regeneration") is False:
             payload["allowed_actions"].remove("REGENERATE")
+        if not any(b["quality"]["value"] >= cfg.quality_threshold for b in bundles):
+            payload["allowed_actions"].remove("READY_FOR_DEPLOYMENT")
         payload["generator_contract"] = generator
         self._enqueue(session, run, "DECIDE", "typesafe", payload, f"{run.id}:decide:{run.round}:{run.stats.get('extra_evaluations',0)}")
         run.state = RunState.DECIDING
+
+    def _repair_constraints(self, session, run, generated, evidence):
+        """Propose a bounded correction; failed outputs never become eligible winners."""
+        cfg = RunConfig.model_validate(run.snapshot["config"])
+        if (self._budget_reason(run, cfg) or run.round + 1 >= cfg.max_rounds
+                or run.stats["generation_count"] >= cfg.max_candidates):
+            return False
+        repairable = []
+        for creative in generated:
+            bundle = evidence[creative.id]
+            vision = next((e["result"] for e in bundle["evaluations"] if e["evaluator"] == "vision"), {})
+            checks = bundle["hard_constraints"]
+            if (vision.get("status") == "SUCCEEDED"
+                    and vision.get("observations", {}).get("media_delivery") == "GENERATED_MEDIA"
+                    and bundle.get("quality") and any(c["status"] == "FAIL" for c in checks)
+                    and all(c["status"] in {"PASS", "FAIL"} for c in checks)):
+                repairable.append(creative)
+        if not repairable:
+            return False
+        capability = "generate_" + run.snapshot["campaign"]["media_kind"]
+        generators = [w.capabilities[capability] for w in session.scalars(select(Worker))
+                      if w.heartbeat_at > now() - self.settings.worker_stale_seconds
+                      and w.capabilities.get(capability, {}).get("status") == "READY"]
+        if not generators:
+            return False
+        parents = repairable[:cfg.beam_width]
+        for parent in parents:
+            parent.status = "INVALID"
+        run.round += 1
+        run.stop_reason = None
+        emit(session, run, "CONSTRAINT_REPAIR_REQUESTED", parent_ids=[p.id for p in parents],
+             detail="Failed outputs remain ineligible. A corrective plan must pass TypeSafe before generation.")
+        self._plan_job(session, run, parents,
+                       conditioning="text_alternative" if generators[0].get("supports_regeneration") is False else "media",
+                       constraint_repair=True)
+        return True
+
+    def retry_constraint_repair(self, run_id):
+        with self.store.transaction() as session:
+            run = required(session, Run, run_id, lock=True)
+            if run.state != RunState.READY_FOR_REVIEW or run.stop_reason != "INSUFFICIENT_EVIDENCE_OR_CONSTRAINT_FAILURE":
+                raise DomainError("Only a run stopped on failed output constraints can request this repair")
+            if session.scalar(select(Job.id).where(Job.run_id == run.id, Job.status.in_(["LEASED", "PENDING", "RETRY"]))):
+                raise DomainError("Wait for pending run jobs before requesting repair")
+            generated = list(session.scalars(select(Creative).where(Creative.run_id == run.id, Creative.round == run.round, Creative.output_asset_id.is_not(None))))
+            evidence = {c.id: self._evidence(session, c) for c in generated}
+            if not self._repair_constraints(session, run, generated, evidence):
+                raise DomainError("No repairable evidence, generator, or remaining budget")
+            return record(run)
+
+    def correct_invalid_plan(self, run_id):
+        """Correct a demonstrably invalid stored plan, never reroll a valid gate decision."""
+        with self.store.transaction() as session:
+            run = required(session, Run, run_id, lock=True)
+            if run.state != RunState.READY_FOR_REVIEW or not (run.stop_reason or "").startswith("TYPESAFE_PLAN"):
+                raise DomainError("Only a stopped plan review can be checked for a contract correction")
+            job = session.scalar(select(Job).where(Job.run_id == run.id, Job.kind == "PLAN", Job.status == "SUCCEEDED").order_by(Job.created_at.desc()))
+            if not job or job.payload.get("validation_correction"):
+                raise DomainError("No uncorrected plan is available")
+            try:
+                self._validate_plan(session, run, job, PlanResult.model_validate(job.result))
+            except DomainError as error:
+                correction = error.detail
+            else:
+                raise DomainError("This plan passes its contract; its review cannot be bypassed")
+            if self._budget_reason(run, RunConfig.model_validate(run.snapshot["config"])):
+                raise DomainError("Run budget exhausted")
+            payload = {**job.payload, "validation_correction": correction}
+            self._enqueue(session, run, "PLAN", "reasoner", payload, f"{job.id}:validation-correction")
+            run.state, run.stop_reason = RunState.REGENERATING if run.round else RunState.PLANNING, None
+            emit(session, run, "INVALID_PLAN_CORRECTION_REQUESTED", previous_job_id=job.id, validation_error=correction)
+            return record(run)
 
     def _complete_decision(self, session, run, job, result):
         allowed = set(job.payload["allowed_creative_ids"])
@@ -747,7 +916,11 @@ class LoopEngine:
                 if job.attempt >= job.max_attempts:
                     raise DomainError("Retry limit reached; create a new budgeted run rather than bypassing it")
                 job.status, job.available_at, job.lease_hash = "RETRY", now(), None
-            run.state, run.stop_reason = RunState.GENERATING, None
+            next_kind = min(jobs, key=lambda j: j.created_at).kind if jobs else "GENERATE"
+            run.state = {"PLAN": RunState.PLANNING if run.round == 0 else RunState.REGENERATING,
+                         "REVIEW_PLAN": RunState.PLANNING, "EVALUATE": RunState.EVALUATING,
+                         "DECIDE": RunState.DECIDING}.get(next_kind, RunState.GENERATING)
+            run.stop_reason = None
             emit(session, run, "RESUMED", uncertainty_acknowledged=acknowledge_uncertain_cost)
             return record(run)
 

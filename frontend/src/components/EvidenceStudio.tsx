@@ -1,5 +1,6 @@
 "use client";
 import "../app/brain-lab.css";
+import styles from "./WorkspaceNavigation.module.css";
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { LineChart } from "./Charts";
@@ -100,7 +101,7 @@ function SignedTable({
   );
 }
 
-export default function EvidenceStudio() {
+export default function EvidenceStudio({ campaignId = "" }: { campaignId?: string }) {
   const [receipts, setReceipts] = useState<Receipt[]>([]),
     [selected, setSelected] = useState("");
   const [error, setError] = useState(""),
@@ -108,6 +109,9 @@ export default function EvidenceStudio() {
     [frame, setFrame] = useState(0),
     [playing, setPlaying] = useState(false);
   const [backups, setBackups] = useState<Backups | null>(null);
+  const [windowSelection, setWindowSelection] = useState("auto");
+  const [mediaTime, setMediaTime] = useState(0);
+  const [pattern, setPattern] = useState("all");
   const video = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     const controller = new AbortController();
@@ -115,7 +119,7 @@ export default function EvidenceStudio() {
     async function refresh() {
       try {
         const [response, backupResponse] = await Promise.all([
-          fetch("/api/v2/evidence", {
+          fetch(`/api/v2/evidence${campaignId ? `?campaign_id=${encodeURIComponent(campaignId)}` : ""}`, {
             cache: "no-store",
             signal: controller.signal,
           }),
@@ -145,7 +149,7 @@ export default function EvidenceStudio() {
       controller.abort();
       clearTimeout(timer);
     };
-  }, []);
+  }, [campaignId]);
   const media = Array.from(
     new Map(receipts.map((r) => [r.input_asset_id, r.input_asset])).values(),
   );
@@ -170,12 +174,12 @@ export default function EvidenceStudio() {
     kragel = obj(brain.kragel);
   const frameIndex = Math.min(frame, Math.max(times.length - 1, 0));
   const windows = Array.isArray(affect.windows) ? affect.windows.map(obj) : [];
-  const currentWindow =
+  const currentWindow = windowSelection !== "auto" ? windows[Number(windowSelection)] :
     windows.find(
       (w) =>
-        Number(w.start) <= (times[frameIndex] || 0) &&
-        Number(w.end) > (times[frameIndex] || 0),
-    ) || windows[0];
+        Number(w.start) <= (asset?.kind === "video" || asset?.kind === "audio" ? mediaTime : times[frameIndex] || 0) &&
+        Number(w.end) > (asset?.kind === "video" || asset?.kind === "audio" ? mediaTime : times[frameIndex] || 0),
+    );
   const labels = Array.isArray(affect.labels) ? affect.labels.map(String) : [];
   const aggregate = obj(kragel.aggregate);
   const selection = obj(brain.model_selection);
@@ -188,6 +192,9 @@ export default function EvidenceStudio() {
   useEffect(() => {
     setFrame(0);
     setPlaying(false);
+    setMediaTime(0);
+    setWindowSelection("auto");
+    setPattern("all");
   }, [assetId]);
   useEffect(() => {
     if (!playing || asset?.kind === "video" || !times.length) return;
@@ -199,6 +206,7 @@ export default function EvidenceStudio() {
   }, [playing, asset?.kind, times.length]);
   function seek(index: number) {
     setFrame(index);
+    setMediaTime(times[index] || 0);
     if (video.current) video.current.currentTime = times[index] || 0;
   }
   function downloadReceipt() {
@@ -219,7 +227,7 @@ export default function EvidenceStudio() {
             <span className="ev-kicker">
               LIVE EVIDENCE LIBRARY · REFRESHES EVERY 5 SECONDS
             </span>
-            <h2>Brain, media & model history</h2>
+            <h2>Brain & emotion</h2>
             <p>
               Real notebook receipts, linked to the exact input checksum.
               Cortical colors are model predictions, not a recording of a
@@ -255,7 +263,17 @@ export default function EvidenceStudio() {
           </p>
         )}
       </section>
-      <section className="nl-panel">
+      <nav className={styles.sections} aria-label="Evidence sections">
+        <a href="#evidence-media">Generated media</a>
+        {asset && <>
+          <a href="#evidence-playback">Stimulus & brain</a>
+          {tribe && <a href="#evidence-cortex">Cortical timeline</a>}
+          <a href="#evidence-emotion">Emotion & affect</a>
+          {tribe && <a href="#evidence-regions">Brain regions</a>}
+          <a href="#evidence-models">Models & receipts</a>
+        </>}
+      </nav>
+      <section id="evidence-media" className={`nl-panel ${styles.target}`}>
         <h3>Generated media & revision history</h3>
         <p>
           Select an output to inspect its own evidence. Revision links cite the
@@ -324,7 +342,7 @@ export default function EvidenceStudio() {
               },
             )}
           </div>
-          <section className="ev-pair">
+          <section id="evidence-playback" className={`ev-pair ${styles.target}`}>
             <div className="nl-panel ev-media">
               <span className="ev-kicker">
                 {group[0]?.source_kind.replaceAll("_", " ")}
@@ -338,6 +356,7 @@ export default function EvidenceStudio() {
                   preload="metadata"
                   onTimeUpdate={(e) => {
                     const t = e.currentTarget.currentTime;
+                    setMediaTime(t);
                     let i = 0;
                     times.forEach((v, j) => {
                       if (v <= t) i = j;
@@ -350,7 +369,7 @@ export default function EvidenceStudio() {
               ) : asset.kind === "image" ? (
                 <img src={mediaUrl(asset.id)} alt={asset.name} />
               ) : (
-                <audio src={mediaUrl(asset.id)} controls />
+                <audio src={mediaUrl(asset.id)} controls onTimeUpdate={(e) => setMediaTime(e.currentTarget.currentTime)} />
               )}
               <a
                 className="nl-button"
@@ -480,7 +499,7 @@ export default function EvidenceStudio() {
             </section>
           )}
           {tribe && (
-            <section className="nl-panel">
+            <section id="evidence-cortex" className={`nl-panel ${styles.target}`}>
               <h3>Cortical response over time</h3>
               <div className="ev-table-wrap">
                 <table className="ev-table">
@@ -563,13 +582,22 @@ export default function EvidenceStudio() {
               </div>
             </section>
           )}
-          <section className="ev-pair">
+          <section id="evidence-emotion" className={`ev-pair ${styles.target}`}>
             <div className="nl-panel">
               <h3>TSAM · audiovisual affect</h3>
               <p>
                 {tsam?.result.status || "NOT RUN"} · raw uncalibrated logits,
                 not probabilities or measured feelings.
               </p>
+              {windows.length > 0 && (
+                <label className="ev-select">
+                  TSAM time window
+                  <select value={windowSelection} onChange={(e) => setWindowSelection(e.target.value)}>
+                    <option value="auto">Follow playback</option>
+                    {windows.map((w, index) => <option key={index} value={String(index)}>{text(w.start)}–{text(w.end)} seconds</option>)}
+                  </select>
+                </label>
+              )}
               {currentWindow ? (
                 <>
                   <p>
@@ -588,7 +616,7 @@ export default function EvidenceStudio() {
                   </p>
                 </>
               ) : (
-                <p>TSAM has not returned a valid window for this media.</p>
+                <p>No recorded TSAM window covers this playback time. Select a recorded window above, if available.</p>
               )}
             </div>
             <div className="nl-panel">
@@ -607,9 +635,16 @@ export default function EvidenceStudio() {
                 values={Object.values(aggregate).map(Number)}
                 label="Experimental pattern correlations"
               />
+              {Object.keys(obj(kragel.trajectories)).length > 0 && <label className="ev-select">
+                Emotion pattern trajectory
+                <select value={pattern} onChange={(e) => setPattern(e.target.value)}>
+                  <option value="all">All recorded patterns</option>
+                  {Object.keys(obj(kragel.trajectories)).map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
+              </label>}
               {Object.keys(obj(kragel.trajectories)).length > 0 && (
                 <LineChart
-                  series={Object.entries(obj(kragel.trajectories)).map(
+                  series={Object.entries(obj(kragel.trajectories)).filter(([name]) => pattern === "all" || name === pattern).map(
                     ([name, values]) => ({ name, values: nums(values) }),
                   )}
                   labels={nums(kragel.times).map((t) => `${t}s`)}
@@ -619,9 +654,9 @@ export default function EvidenceStudio() {
             </div>
           </section>
           {tribe && (
-            <AnatomicalReadout key={tribe.id} evaluationId={tribe.id} />
+            <div id="evidence-regions" className={styles.target}><AnatomicalReadout key={tribe.id} evaluationId={tribe.id} /></div>
           )}
-          <section className="nl-panel">
+          <section id="evidence-models" className={`nl-panel ${styles.target}`}>
             <div className="ev-heading">
               <h3>Models, receipts & downloads</h3>
               <button className="nl-button" onClick={downloadReceipt}>

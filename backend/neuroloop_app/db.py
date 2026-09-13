@@ -246,6 +246,51 @@ class Deployment(Base):
     created_at: Mapped[float] = mapped_column(Float, default=now)
 
 
+class AdConnection(Base):
+    """Encrypted advertiser authorization for one single-owner provider connection."""
+    __tablename__ = "ad_connections"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    provider: Mapped[str] = mapped_column(String(30), unique=True, index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    external_user_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    display_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    access_token_ciphertext: Mapped[str] = mapped_column(Text)
+    refresh_token_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_expires_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    scopes: Mapped[list] = mapped_column(JSON, default=list)
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[float] = mapped_column(Float, default=now)
+    updated_at: Mapped[float] = mapped_column(Float, default=now)
+
+
+class AdOAuthAttempt(Base):
+    __tablename__ = "ad_oauth_attempts"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    provider: Mapped[str] = mapped_column(String(30), index=True)
+    state_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[float] = mapped_column(Float)
+    used: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[float] = mapped_column(Float, default=now)
+
+
+class AdPublication(Base):
+    """Immutable creative-to-provider asset handoff receipt. No spend authorization."""
+    __tablename__ = "ad_publications"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    provider: Mapped[str] = mapped_column(String(30), index=True)
+    connection_id: Mapped[str] = mapped_column(ForeignKey("ad_connections.id"), index=True)
+    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id"), index=True)
+    asset_id: Mapped[str] = mapped_column(ForeignKey("creative_assets.id"), index=True)
+    account_id: Mapped[str] = mapped_column(String(200))
+    idempotency_key: Mapped[str] = mapped_column(String(64), unique=True)
+    spec: Mapped[dict] = mapped_column(JSON)
+    state: Mapped[str] = mapped_column(String(40), default="DRAFT", index=True)
+    remote: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[float] = mapped_column(Float, default=now)
+    updated_at: Mapped[float] = mapped_column(Float, default=now)
+
+
 Index("ix_jobs_claim", Job.status, Job.available_at, Job.capability)
 
 

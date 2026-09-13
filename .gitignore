@@ -75,3 +75,4 @@ tribev2-main/
 .wandb/
 infrastructure/wheels/
 artifacts/
+frontend/.next-observability/

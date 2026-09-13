@@ -28,13 +28,28 @@ class MetaFailure(RuntimeError):
 
 
 class MetaClient:
-    def __init__(self, settings, client=None):
+    def __init__(self, settings, client=None, token_provider=None):
         self.settings = settings
         self.client = client or httpx.Client(timeout=120, follow_redirects=False)
+        self.token_provider = token_provider
+
+    def access_token(self):
+        if self.token_provider:
+            value = self.token_provider()
+            if value:
+                return value
+        return self.settings.meta_access_token.get_secret_value()
+
+    def configured(self):
+        try:
+            token = self.access_token()
+        except Exception:
+            return False
+        return bool(token and re.fullmatch(r'v[0-9]+\.[0-9]+', self.settings.meta_graph_version))
 
     def request(self, method, node, fields=None, files=None):
         version = self.settings.meta_graph_version
-        token = self.settings.meta_access_token.get_secret_value()
+        token = self.access_token()
         if not token or not re.fullmatch(r'v[0-9]+\.[0-9]+', version):
             raise MetaFailure('NOT_CONFIGURED', 'Set a supported Meta Graph version and server-side access token.')
         if not re.fullmatch(r'(?:act_)?[0-9]+(?:/[a-z_]+)?', node):
@@ -69,7 +84,7 @@ class MetaService:
         self.client = client or MetaClient(store.settings)
 
     def enqueue(self, identity, review_digest):
-        if not self.store.settings.meta_access_token.get_secret_value() or not re.fullmatch(r'v[0-9]+\.[0-9]+', self.store.settings.meta_graph_version):
+        if not self.client.configured():
             raise DomainError('NOT_CONFIGURED: Meta token and supported Graph version are required.', 503)
         with self.store.transaction() as s:
             row = required(s, Deployment, identity, lock=True)

@@ -42,6 +42,33 @@
 .app-shell.nl-shell .nav-item {
   flex-shrink: 0;
 }
+.app-shell.nl-shell .nl-nav-groups {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+}
+.app-shell.nl-shell .nl-nav-disclosure {
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+}
+.app-shell.nl-shell .nl-nav-disclosure:not(:hover) {
+  background: transparent;
+}
+.app-shell.nl-shell .nl-nav-chevron {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.app-shell.nl-shell .nl-nav-disclosure[aria-expanded="true"] .nl-nav-chevron {
+  transform: rotate(180deg);
+}
+.app-shell.nl-shell .nl-nav-children {
+  padding-left: 14px;
+}
+.app-shell.nl-shell .nl-nav-children .nav-item {
+  padding-block: 9px;
+}
 .app-shell.nl-shell .nl-content {
   width: 100%;
 }
@@ -1016,6 +1043,15 @@
 .ev-kicker { font-size: 10px; font-weight: 700; letter-spacing: .12em; color: #358f87; }
 .ev-select { display: grid; gap: 8px; margin-top: 20px; font-size: 12px; }
 .ev-select select { padding: 12px; border: 1px solid var(--nl-line, #ddd); border-radius: 8px; background: transparent; color: inherit; width: 100%; }
+.telemetry-metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:14px; margin-top:24px; }
+.telemetry-metrics article { padding:20px; background:var(--nl-bg); border:1px solid var(--nl-line); border-radius:12px; }
+.telemetry-metrics span { display:block; font-size:12px; color:var(--nl-muted); }
+.telemetry-metrics strong { display:block; font-size:27px; margin-top:12px; }
+.telemetry-bars { display:grid; gap:16px; margin:24px 0; }
+.telemetry-bars > div { display:flex; align-items:center; gap:14px; }
+.telemetry-bars span { min-width:100px; }
+.telemetry-bars i { display:block; height:22px; background:#57978f; border-radius:4px; }
+.telemetry-bars b { font-size:12px; white-space:nowrap; }
 .ev-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; }
 .ev-pair > * { min-width: 0; }
 .ev-media video, .ev-media img { display: block; width: 100%; max-height: 440px; object-fit: contain; border-radius: 12px; background: #0f1519; margin: 16px 0; }
